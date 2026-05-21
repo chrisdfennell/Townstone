@@ -1,66 +1,76 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   attack,
+  beginPlay,
   canAttack,
   canPlayCard,
+  canUseHeroPower,
+  chooseMulligan,
   createGame,
   endTurn,
   getCardDef,
+  mulligan,
   playCard,
   runAiTurn,
-  starterDeck,
+  sameRef,
+  useHeroPower,
   validAttackTargets,
   validTargets,
 } from "../engine";
-import type { CharacterRef, GameState, PlayerId } from "../engine";
+import type { CharacterRef, GameState, HeroClass, PlayerId } from "../engine";
 
 const AI_FRAME_DELAY_MS = 850;
 
-function sameRef(a: CharacterRef, b: CharacterRef): boolean {
-  if (a.kind === "hero" && b.kind === "hero") return a.player === b.player;
-  if (a.kind === "minion" && b.kind === "minion") return a.instanceId === b.instanceId;
-  return false;
+export interface GameConfig {
+  playerClass: HeroClass;
+  playerDeck: string[];
+  aiClass: HeroClass;
+  aiDeck: string[];
+  seed?: number;
 }
 
-function freshGame(): GameState {
-  return createGame({
-    first: "player",
-    playerDeck: starterDeck(),
-    aiDeck: starterDeck(),
-    playerClass: "barbarian",
-    aiClass: "necromancer",
-  });
-}
+/** What the player is currently committing to act with (awaiting a target). */
+type Pending = { kind: "card"; instanceId: string } | { kind: "power" } | null;
 
 export interface UseGame {
   state: GameState;
-  /** Whether the AI is currently taking its turn (input locked). */
   aiThinking: boolean;
-  /** Hand card the player is about to play (awaiting a target), if any. */
-  pendingPlayId: string | null;
-  /** Player minion currently selected as an attacker, if any. */
+  pending: Pending;
   selectedAttackerId: string | null;
-  /** Characters that can be clicked right now given the current selection. */
   highlightedTargets: CharacterRef[];
   isMyTurn: boolean;
+  /** Hand instance ids the player has marked to replace during the mulligan. */
+  mulliganChoices: string[];
   clickHandCard(instanceId: string): void;
+  clickHeroPower(): void;
   clickMinion(instanceId: string, owner: PlayerId): void;
   clickHero(player: PlayerId): void;
   clickBoard(): void;
   endMyTurn(): void;
+  toggleMulligan(instanceId: string): void;
+  confirmMulligan(): void;
   cancelSelection(): void;
-  newGame(): void;
 }
 
-export function useGame(): UseGame {
-  const [state, setState] = useState<GameState>(freshGame);
+export function useGame(config: GameConfig): UseGame {
+  const [state, setState] = useState<GameState>(() =>
+    createGame({
+      first: "player",
+      playerClass: config.playerClass,
+      playerDeck: config.playerDeck,
+      aiClass: config.aiClass,
+      aiDeck: config.aiDeck,
+      seed: config.seed,
+    }),
+  );
   const [aiThinking, setAiThinking] = useState(false);
-  const [pendingPlayId, setPendingPlayId] = useState<string | null>(null);
+  const [pending, setPending] = useState<Pending>(null);
   const [selectedAttackerId, setSelectedAttackerId] = useState<string | null>(null);
+  const [mulliganChoices, setMulliganChoices] = useState<string[]>([]);
   const timers = useRef<number[]>([]);
 
   const clearSelection = useCallback(() => {
-    setPendingPlayId(null);
+    setPending(null);
     setSelectedAttackerId(null);
   }, []);
 
@@ -78,15 +88,10 @@ export function useGame(): UseGame {
         timers.current.push(window.setTimeout(playNext, AI_FRAME_DELAY_MS));
       } else {
         const base = frames.length ? frames[frames.length - 1] : state;
-        if (base.phase === "playing") {
-          setState(endTurn(base, "ai"));
-        } else {
-          setState(base);
-        }
+        setState(base.phase === "playing" ? endTurn(base, "ai") : base);
         setAiThinking(false);
       }
     };
-    // Small initial pause so the player sees the turn hand off.
     timers.current.push(window.setTimeout(playNext, AI_FRAME_DELAY_MS));
     return () => {
       timers.current.forEach((t) => window.clearTimeout(t));
@@ -97,43 +102,29 @@ export function useGame(): UseGame {
 
   const inputLocked = aiThinking || state.current !== "player" || state.phase !== "playing";
 
-  // Compute clickable targets based on current selection.
+  // Compute clickable targets based on the current pending action.
   let highlightedTargets: CharacterRef[] = [];
   if (!inputLocked) {
-    if (pendingPlayId) {
-      const card = state.players.player.hand.find((c) => c.instanceId === pendingPlayId);
-      if (card) highlightedTargets = validTargets(state, "player", getCardDef(card.defId));
+    if (pending?.kind === "card") {
+      const card = state.players.player.hand.find((c) => c.instanceId === pending.instanceId);
+      if (card) highlightedTargets = validTargets(state, "player", getCardDef(card.defId).targetFilter);
+    } else if (pending?.kind === "power") {
+      highlightedTargets = validTargets(state, "player", state.players.player.hero.power.targetFilter);
     } else if (selectedAttackerId) {
       highlightedTargets = validAttackTargets(state, "player");
     }
   }
 
-  const clickHandCard = useCallback(
-    (instanceId: string) => {
-      if (inputLocked) return;
-      if (!canPlayCard(state, "player", instanceId)) return;
-      setSelectedAttackerId(null);
-      const def = getCardDef(state.players.player.hand.find((c) => c.instanceId === instanceId)!.defId);
-      if (def.requiresTarget) {
-        // Toggle off if re-clicking the same card.
-        setPendingPlayId((prev) => (prev === instanceId ? null : instanceId));
-      } else {
-        setState(playCard(state, "player", instanceId));
-        setPendingPlayId(null);
-      }
-    },
-    [state, inputLocked],
-  );
-
-  const tryPlayOnTarget = useCallback(
+  const resolvePendingOnTarget = useCallback(
     (ref: CharacterRef): boolean => {
-      if (!pendingPlayId) return false;
+      if (!pending) return false;
       if (!highlightedTargets.some((t) => sameRef(t, ref))) return false;
-      setState(playCard(state, "player", pendingPlayId, { target: ref }));
-      setPendingPlayId(null);
+      if (pending.kind === "card") setState(playCard(state, "player", pending.instanceId, { target: ref }));
+      else setState(useHeroPower(state, "player", { target: ref }));
+      setPending(null);
       return true;
     },
-    [pendingPlayId, highlightedTargets, state],
+    [pending, highlightedTargets, state],
   );
 
   const tryAttack = useCallback(
@@ -147,33 +138,58 @@ export function useGame(): UseGame {
     [selectedAttackerId, highlightedTargets, state],
   );
 
+  const clickHandCard = useCallback(
+    (instanceId: string) => {
+      if (inputLocked || !canPlayCard(state, "player", instanceId)) return;
+      setSelectedAttackerId(null);
+      const def = getCardDef(state.players.player.hand.find((c) => c.instanceId === instanceId)!.defId);
+      if (def.requiresTarget) {
+        setPending((prev) => (prev?.kind === "card" && prev.instanceId === instanceId ? null : { kind: "card", instanceId }));
+      } else {
+        setState(playCard(state, "player", instanceId));
+        setPending(null);
+      }
+    },
+    [state, inputLocked],
+  );
+
+  const clickHeroPower = useCallback(() => {
+    if (inputLocked || !canUseHeroPower(state, "player")) return;
+    setSelectedAttackerId(null);
+    const power = state.players.player.hero.power;
+    if (power.requiresTarget) {
+      setPending((prev) => (prev?.kind === "power" ? null : { kind: "power" }));
+    } else {
+      setState(useHeroPower(state, "player"));
+      setPending(null);
+    }
+  }, [state, inputLocked]);
+
   const clickMinion = useCallback(
     (instanceId: string, owner: PlayerId) => {
       if (inputLocked) return;
       const ref: CharacterRef = { kind: "minion", instanceId };
-      if (tryPlayOnTarget(ref)) return;
+      if (resolvePendingOnTarget(ref)) return;
       if (tryAttack(ref)) return;
       if (owner === "player" && canAttack(state, "player", instanceId)) {
         setSelectedAttackerId((prev) => (prev === instanceId ? null : instanceId));
-        setPendingPlayId(null);
+        setPending(null);
       }
     },
-    [state, inputLocked, tryPlayOnTarget, tryAttack],
+    [state, inputLocked, resolvePendingOnTarget, tryAttack],
   );
 
   const clickHero = useCallback(
     (player: PlayerId) => {
       if (inputLocked) return;
       const ref: CharacterRef = { kind: "hero", player };
-      if (tryPlayOnTarget(ref)) return;
+      if (resolvePendingOnTarget(ref)) return;
       tryAttack(ref);
     },
-    [inputLocked, tryPlayOnTarget, tryAttack],
+    [inputLocked, resolvePendingOnTarget, tryAttack],
   );
 
-  const clickBoard = useCallback(() => {
-    clearSelection();
-  }, [clearSelection]);
+  const clickBoard = useCallback(() => clearSelection(), [clearSelection]);
 
   const endMyTurn = useCallback(() => {
     if (inputLocked) return;
@@ -181,27 +197,37 @@ export function useGame(): UseGame {
     setState(endTurn(state, "player"));
   }, [state, inputLocked, clearSelection]);
 
-  const newGame = useCallback(() => {
-    timers.current.forEach((t) => window.clearTimeout(t));
-    timers.current = [];
-    setAiThinking(false);
-    clearSelection();
-    setState(freshGame());
-  }, [clearSelection]);
+  const toggleMulligan = useCallback((instanceId: string) => {
+    setMulliganChoices((prev) =>
+      prev.includes(instanceId) ? prev.filter((id) => id !== instanceId) : [...prev, instanceId],
+    );
+  }, []);
+
+  const confirmMulligan = useCallback(() => {
+    if (state.phase !== "mulligan") return;
+    let s = mulligan(state, "player", mulliganChoices);
+    s = mulligan(s, "ai", chooseMulligan(s, "ai"));
+    s = beginPlay(s);
+    setMulliganChoices([]);
+    setState(s);
+  }, [state, mulliganChoices]);
 
   return {
     state,
     aiThinking,
-    pendingPlayId,
+    pending,
     selectedAttackerId,
     highlightedTargets,
     isMyTurn: !inputLocked,
+    mulliganChoices,
     clickHandCard,
+    clickHeroPower,
     clickMinion,
     clickHero,
     clickBoard,
     endMyTurn,
+    toggleMulligan,
+    confirmMulligan,
     cancelSelection: clearSelection,
-    newGame,
   };
 }

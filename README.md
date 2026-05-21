@@ -55,13 +55,15 @@ game is fully reproducible from `seed + action list`.
 
 ## Roadmap
 
-- [ ] More cards, keywords (Deathrattle chains, Spell Damage, Lifesteal, Freeze)
-- [ ] Hero powers + Diablo class identities (Barbarian, Sorceress, Necromancer…)
-- [ ] Mulligan / opening-hand selection + "The Coin"
-- [ ] Deckbuilder and collection
+- [x] More cards + keywords (Lifesteal, Poisonous, Windfury, Freeze, Spell Damage)
+- [x] Hero powers + Diablo class identities (Barbarian, Sorceress, Necromancer, Demon Hunter)
+- [x] Mulligan / opening-hand selection + "The Coin"
+- [x] Deckbuilder and collection (per-class, saved to localStorage)
+- [x] Juice: floating damage numbers, minion-summon + freeze animations
+- [ ] Deathrattle chains, more legendaries, secrets
 - [ ] Smarter AI (lookahead / scoring of full turns)
+- [ ] Sound + richer art
 - [ ] **Multiplayer**: move the engine behind an authoritative Node + WebSocket
       server. Because the engine is already pure and serializable, the same
       module runs on the server; clients send actions and receive new states.
-- [ ] Art, animations, sound
 ```

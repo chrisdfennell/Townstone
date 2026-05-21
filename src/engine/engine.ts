@@ -3,13 +3,16 @@ import type {
   CharacterRef,
   Effect,
   GameState,
+  HeroPower,
   Keyword,
   Minion,
   PlayerId,
   PlayerState,
+  TargetFilter,
   TargetSelector,
 } from "./types";
 import { getCardDef } from "./cards";
+import { heroPowerFor } from "./heroes";
 import { nextInt, shuffle } from "./rng";
 
 export const RULES = {
@@ -20,6 +23,8 @@ export const RULES = {
   startingHandFirst: 3,
   startingHandSecond: 4,
 } as const;
+
+export const COIN_CARD_ID = "the_coin";
 
 // ---------------------------------------------------------------------------
 // Setup
@@ -36,13 +41,21 @@ function clone(state: GameState): GameState {
 function emptyPlayer(id: PlayerId, className: PlayerState["hero"]["className"]): PlayerState {
   return {
     id,
-    hero: { health: RULES.startingHealth, maxHealth: RULES.startingHealth, armor: 0, className },
+    hero: {
+      health: RULES.startingHealth,
+      maxHealth: RULES.startingHealth,
+      armor: 0,
+      className,
+      power: heroPowerFor(className),
+      powerUsedThisTurn: false,
+    },
     mana: 0,
     maxMana: 0,
     hand: [],
     deck: [],
     board: [],
     fatigue: 0,
+    mulliganed: false,
   };
 }
 
@@ -55,16 +68,19 @@ export interface NewGameOptions {
   aiClass?: PlayerState["hero"]["className"];
 }
 
+/** Creates a game in the mulligan phase. Call `beginPlay` once both sides have
+ *  submitted their mulligan via `mulligan`. */
 export function createGame(opts: NewGameOptions): GameState {
   const first = opts.first ?? "player";
   const state: GameState = {
     players: {
-      player: emptyPlayer("player", opts.playerClass ?? "neutral"),
+      player: emptyPlayer("player", opts.playerClass ?? "barbarian"),
       ai: emptyPlayer("ai", opts.aiClass ?? "necromancer"),
     },
     current: first,
+    first,
     turn: 0,
-    phase: "playing",
+    phase: "mulligan",
     winner: null,
     log: [],
     nextInstanceId: 1,
@@ -74,13 +90,9 @@ export function createGame(opts: NewGameOptions): GameState {
   loadDeck(state, "player", opts.playerDeck);
   loadDeck(state, "ai", opts.aiDeck);
 
-  // Opening hands.
   const second = opponentOf(first);
   draw(state, first, RULES.startingHandFirst);
   draw(state, second, RULES.startingHandSecond);
-
-  log(state, `The battle begins. ${first === "player" ? "You go" : "The enemy goes"} first.`);
-  beginTurn(state, first);
   return state;
 }
 
@@ -100,6 +112,50 @@ function log(state: GameState, message: string): void {
 }
 
 // ---------------------------------------------------------------------------
+// Mulligan
+// ---------------------------------------------------------------------------
+
+/** Replaces the chosen opening-hand cards: set them aside, draw that many, then
+ *  shuffle the replaced cards back into the deck. */
+export function mulligan(state: GameState, playerId: PlayerId, replaceIds: string[]): GameState {
+  if (state.phase !== "mulligan") return state;
+  const next = clone(state);
+  const p = next.players[playerId];
+  if (p.mulliganed) return state;
+
+  const replaced = [];
+  for (const id of replaceIds) {
+    const idx = p.hand.findIndex((c) => c.instanceId === id);
+    if (idx >= 0) replaced.push(p.hand.splice(idx, 1)[0]);
+  }
+  for (let i = 0; i < replaced.length; i++) {
+    const card = p.deck.shift();
+    if (card) p.hand.push(card);
+  }
+  p.deck.push(...replaced);
+  const s = shuffle(p.deck, next.rngState);
+  p.deck = s.items;
+  next.rngState = s.state;
+  p.mulliganed = true;
+  return next;
+}
+
+/** Transitions out of the mulligan: gives The Coin to the second player and
+ *  starts the first turn. Both players must have mulliganed first. */
+export function beginPlay(state: GameState): GameState {
+  if (state.phase !== "mulligan") return state;
+  if (!state.players.player.mulliganed || !state.players.ai.mulliganed) return state;
+  const next = clone(state);
+  const second = opponentOf(next.first);
+  next.players[second].hand.push({ instanceId: mintId(next), defId: COIN_CARD_ID });
+  log(next, `The battle begins. ${next.first === "player" ? "You go" : "The enemy goes"} first.`);
+  next.phase = "playing";
+  next.current = next.first;
+  beginTurn(next, next.first);
+  return next;
+}
+
+// ---------------------------------------------------------------------------
 // Turn structure
 // ---------------------------------------------------------------------------
 
@@ -108,9 +164,10 @@ function beginTurn(state: GameState, playerId: PlayerId): void {
   state.turn += 1;
   p.maxMana = Math.min(RULES.maxMana, p.maxMana + 1);
   p.mana = p.maxMana;
+  p.hero.powerUsedThisTurn = false;
   for (const m of p.board) {
     m.summonedThisTurn = false;
-    m.hasAttacked = false;
+    m.attacksThisTurn = 0;
   }
   draw(state, playerId, 1);
 }
@@ -118,6 +175,8 @@ function beginTurn(state: GameState, playerId: PlayerId): void {
 export function endTurn(state: GameState, playerId: PlayerId): GameState {
   if (state.phase !== "playing" || state.current !== playerId) return state;
   const next = clone(state);
+  // Thaw the ending player's frozen minions — they were locked for this turn.
+  for (const m of next.players[playerId].board) m.frozen = false;
   const opponent = opponentOf(playerId);
   next.current = opponent;
   beginTurn(next, opponent);
@@ -133,7 +192,6 @@ function draw(state: GameState, playerId: PlayerId, count: number): void {
   for (let i = 0; i < count; i++) {
     const card = p.deck.shift();
     if (!card) {
-      // Fatigue: out of cards, take escalating damage.
       p.fatigue += 1;
       damageHero(state, playerId, p.fatigue);
       log(state, `${who(playerId)} is exhausted and takes ${p.fatigue} fatigue damage.`);
@@ -148,13 +206,19 @@ function draw(state: GameState, playerId: PlayerId, count: number): void {
 }
 
 // ---------------------------------------------------------------------------
+// Spell Damage
+// ---------------------------------------------------------------------------
+
+function spellPower(state: GameState, controller: PlayerId): number {
+  return state.players[controller].board.reduce((sum, m) => sum + m.spellDamage, 0);
+}
+
+// ---------------------------------------------------------------------------
 // Playing cards
 // ---------------------------------------------------------------------------
 
 export interface PlayOptions {
-  /** Board index to insert a minion at; appended if omitted. */
   position?: number;
-  /** Required when the card has a "chosen" effect. */
   target?: CharacterRef;
 }
 
@@ -166,10 +230,8 @@ export function canPlayCard(state: GameState, playerId: PlayerId, instanceId: st
   const def = getCardDef(card.defId);
   if (def.cost > p.mana) return false;
   if (def.type === "minion" && p.board.length >= RULES.maxBoardSize) return false;
-  if (def.requiresTarget && validTargets(state, playerId, def).length === 0) {
-    // No legal targets and the effect needs one — only block if it's a spell
-    // whose entire purpose is the targeted effect.
-    if (def.type === "spell") return false;
+  if (def.type === "spell" && def.requiresTarget && validTargets(state, playerId, def.targetFilter).length === 0) {
+    return false;
   }
   return true;
 }
@@ -195,10 +257,10 @@ export function playCard(
     const pos = clampPosition(opts.position, p.board.length);
     p.board.splice(pos, 0, minion);
     log(next, `${who(playerId)} plays ${def.name}.`);
-    if (def.onPlay) resolveEffects(next, def.onPlay, playerId, opts.target);
+    if (def.onPlay) resolveEffects(next, def.onPlay, playerId, { target: opts.target, isSpell: false });
   } else {
     log(next, `${who(playerId)} casts ${def.name}.`);
-    if (def.onPlay) resolveEffects(next, def.onPlay, playerId, opts.target);
+    if (def.onPlay) resolveEffects(next, def.onPlay, playerId, { target: opts.target, isSpell: true });
   }
 
   cleanupDeaths(next);
@@ -215,9 +277,11 @@ function createMinion(state: GameState, def: CardDef): Minion {
     health: def.health ?? 1,
     maxHealth: def.health ?? 1,
     keywords: [...(def.keywords ?? [])],
+    spellDamage: def.spellDamage ?? 0,
     divineShield: (def.keywords ?? []).includes("divineShield"),
+    frozen: false,
     summonedThisTurn: true,
-    hasAttacked: false,
+    attacksThisTurn: 0,
     onDeath: def.onDeath ? def.onDeath.map((e) => ({ ...e })) : undefined,
   };
 }
@@ -228,29 +292,57 @@ function clampPosition(pos: number | undefined, len: number): number {
 }
 
 // ---------------------------------------------------------------------------
+// Hero Powers
+// ---------------------------------------------------------------------------
+
+export function canUseHeroPower(state: GameState, playerId: PlayerId): boolean {
+  if (state.phase !== "playing" || state.current !== playerId) return false;
+  const p = state.players[playerId];
+  if (p.hero.powerUsedThisTurn) return false;
+  if (p.hero.power.cost > p.mana) return false;
+  const power = p.hero.power;
+  if (power.requiresTarget && validTargets(state, playerId, power.targetFilter).length === 0) return false;
+  return true;
+}
+
+export function useHeroPower(
+  state: GameState,
+  playerId: PlayerId,
+  opts: { target?: CharacterRef } = {},
+): GameState {
+  if (!canUseHeroPower(state, playerId)) return state;
+  const next = clone(state);
+  const p = next.players[playerId];
+  const power: HeroPower = p.hero.power;
+  p.mana -= power.cost;
+  p.hero.powerUsedThisTurn = true;
+  log(next, `${who(playerId)} uses ${power.name}.`);
+  resolveEffects(next, power.effects, playerId, { target: opts.target, isSpell: false });
+  cleanupDeaths(next);
+  checkWin(next);
+  return next;
+}
+
+// ---------------------------------------------------------------------------
 // Effects
 // ---------------------------------------------------------------------------
 
-function resolveEffects(
-  state: GameState,
-  effects: Effect[],
-  controller: PlayerId,
-  chosen?: CharacterRef,
-): void {
-  for (const effect of effects) {
-    resolveEffect(state, effect, controller, chosen);
-  }
+interface EffectContext {
+  target?: CharacterRef;
+  isSpell: boolean;
 }
 
-function resolveEffect(
-  state: GameState,
-  effect: Effect,
-  controller: PlayerId,
-  chosen?: CharacterRef,
-): void {
+function resolveEffects(state: GameState, effects: Effect[], controller: PlayerId, ctx: EffectContext): void {
+  for (const effect of effects) resolveEffect(state, effect, controller, ctx);
+}
+
+function resolveEffect(state: GameState, effect: Effect, controller: PlayerId, ctx: EffectContext): void {
   switch (effect.kind) {
     case "draw":
       draw(state, controller, effect.amount);
+      break;
+    case "mana":
+      state.players[controller].mana += effect.amount;
       break;
     case "summon": {
       const def = getCardDef(effect.cardId);
@@ -262,19 +354,34 @@ function resolveEffect(
       break;
     }
     case "damage": {
-      for (const ref of resolveSelector(state, effect.selector, controller, chosen)) {
-        applyDamage(state, ref, effect.amount);
+      const bonus = ctx.isSpell ? spellPower(state, controller) : 0;
+      for (const ref of resolveSelector(state, effect.selector, controller, ctx.target)) {
+        applyDamage(state, ref, effect.amount + bonus);
       }
       break;
     }
     case "heal": {
-      for (const ref of resolveSelector(state, effect.selector, controller, chosen)) {
+      for (const ref of resolveSelector(state, effect.selector, controller, ctx.target)) {
         applyHeal(state, ref, effect.amount);
       }
       break;
     }
+    case "armor": {
+      for (const ref of resolveSelector(state, effect.selector, controller, ctx.target)) {
+        if (ref.kind === "hero") state.players[ref.player].hero.armor += effect.amount;
+      }
+      break;
+    }
+    case "freeze": {
+      for (const ref of resolveSelector(state, effect.selector, controller, ctx.target)) {
+        if (ref.kind !== "minion") continue;
+        const m = findMinion(state, ref.instanceId);
+        if (m) m.frozen = true;
+      }
+      break;
+    }
     case "buff": {
-      for (const ref of resolveSelector(state, effect.selector, controller, chosen)) {
+      for (const ref of resolveSelector(state, effect.selector, controller, ctx.target)) {
         if (ref.kind !== "minion") continue;
         const m = findMinion(state, ref.instanceId);
         if (!m) continue;
@@ -326,12 +433,17 @@ function resolveSelector(
 // Combat
 // ---------------------------------------------------------------------------
 
+function maxAttacks(m: Minion): number {
+  return m.keywords.includes("windfury") ? 2 : 1;
+}
+
 export function canAttack(state: GameState, playerId: PlayerId, attackerId: string): boolean {
   if (state.phase !== "playing" || state.current !== playerId) return false;
   const m = state.players[playerId].board.find((x) => x.instanceId === attackerId);
   if (!m) return false;
   if (m.attack <= 0) return false;
-  if (m.hasAttacked) return false;
+  if (m.frozen) return false;
+  if (m.attacksThisTurn >= maxAttacks(m)) return false;
   if (m.summonedThisTurn && !m.keywords.includes("charge")) return false;
   return true;
 }
@@ -356,11 +468,7 @@ export function attack(
 ): GameState {
   if (!canAttack(state, playerId, attackerId)) return state;
   const legal = validAttackTargets(state, playerId);
-  const isLegal = legal.some((t) =>
-    t.kind === "hero" && target.kind === "hero"
-      ? t.player === target.player
-      : t.kind === "minion" && target.kind === "minion" && t.instanceId === target.instanceId,
-  );
+  const isLegal = legal.some((t) => sameRef(t, target));
   if (!isLegal) return state;
 
   const next = clone(state);
@@ -368,41 +476,62 @@ export function attack(
 
   if (target.kind === "hero") {
     log(next, `${attacker.name} strikes ${who(target.player)}'s hero for ${attacker.attack}.`);
-    applyDamage(next, target, attacker.attack);
+    const dealt = applyDamage(next, target, attacker.attack);
+    applyLifesteal(next, attacker, playerId, dealt);
   } else {
     const defender = findMinion(next, target.instanceId);
     if (!defender) return state;
     log(next, `${attacker.name} (${attacker.attack}/${attacker.health}) attacks ${defender.name} (${defender.attack}/${defender.health}).`);
     const attackerPower = attacker.attack;
     const defenderPower = defender.attack;
-    applyDamage(next, target, attackerPower);
-    applyDamage(next, { kind: "minion", instanceId: attacker.instanceId }, defenderPower);
+    const dealtToDefender = applyDamage(next, target, attackerPower);
+    const dealtToAttacker = applyDamage(next, { kind: "minion", instanceId: attacker.instanceId }, defenderPower);
+    applyLifesteal(next, attacker, playerId, dealtToDefender);
+    applyPoison(next, attacker, target, dealtToDefender);
+    const defenderOwner = opponentOf(playerId);
+    applyLifesteal(next, defender, defenderOwner, dealtToAttacker);
+    applyPoison(next, defender, { kind: "minion", instanceId: attacker.instanceId }, dealtToAttacker);
   }
 
-  attacker.hasAttacked = true;
+  attacker.attacksThisTurn += 1;
   cleanupDeaths(next);
   checkWin(next);
   return next;
+}
+
+function applyLifesteal(state: GameState, source: Minion, owner: PlayerId, dealt: number): void {
+  if (dealt > 0 && source.keywords.includes("lifesteal")) {
+    applyHeal(state, { kind: "hero", player: owner }, dealt);
+  }
+}
+
+function applyPoison(state: GameState, source: Minion, target: CharacterRef, dealt: number): void {
+  if (dealt > 0 && source.keywords.includes("poisonous") && target.kind === "minion") {
+    const m = findMinion(state, target.instanceId);
+    if (m) m.health = 0;
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Damage / heal / deaths
 // ---------------------------------------------------------------------------
 
-function applyDamage(state: GameState, ref: CharacterRef, amount: number): void {
-  if (amount <= 0) return;
+/** Applies damage and returns the amount actually dealt (0 if a shield ate it). */
+function applyDamage(state: GameState, ref: CharacterRef, amount: number): number {
+  if (amount <= 0) return 0;
   if (ref.kind === "hero") {
     damageHero(state, ref.player, amount);
-    return;
+    return amount;
   }
   const m = findMinion(state, ref.instanceId);
-  if (!m) return;
+  if (!m) return 0;
   if (m.divineShield) {
     m.divineShield = false;
     log(state, `${m.name}'s Divine Shield absorbs the blow.`);
-    return;
+    return 0;
   }
   m.health -= amount;
+  return amount;
 }
 
 function damageHero(state: GameState, playerId: PlayerId, amount: number): void {
@@ -437,7 +566,7 @@ function cleanupDeaths(state: GameState): void {
           board.splice(i, 1);
           log(state, `${m.name} is destroyed.`);
           if (m.onDeath) {
-            resolveEffects(state, m.onDeath, playerId);
+            resolveEffects(state, m.onDeath, playerId, { isSpell: false });
             changed = true;
           }
         }
@@ -464,6 +593,12 @@ function checkWin(state: GameState): void {
 // Lookups & helpers used by UI/AI
 // ---------------------------------------------------------------------------
 
+export function sameRef(a: CharacterRef, b: CharacterRef): boolean {
+  if (a.kind === "hero" && b.kind === "hero") return a.player === b.player;
+  if (a.kind === "minion" && b.kind === "minion") return a.instanceId === b.instanceId;
+  return false;
+}
+
 export function findMinion(state: GameState, instanceId: string): Minion | undefined {
   return (
     state.players.player.board.find((m) => m.instanceId === instanceId) ??
@@ -477,11 +612,9 @@ export function ownerOfMinion(state: GameState, instanceId: string): PlayerId | 
   return undefined;
 }
 
-/** Valid targets for a card's "chosen" effect, honoring its target filter. */
-export function validTargets(state: GameState, playerId: PlayerId, def: CardDef): CharacterRef[] {
-  if (!def.requiresTarget) return [];
+/** Valid targets for a "chosen" effect, honoring its target filter. */
+export function validTargets(state: GameState, playerId: PlayerId, filter: TargetFilter = "any"): CharacterRef[] {
   const enemy = opponentOf(playerId);
-  const filter = def.targetFilter ?? "any";
   const refs: CharacterRef[] = [];
   const add = (m: Minion) => refs.push({ kind: "minion", instanceId: m.instanceId });
 

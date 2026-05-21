@@ -1,22 +1,37 @@
-import { useMemo } from "react";
-import { useGame } from "./game/useGame";
-import { canAttack as engineCanAttack, canPlayCard } from "./engine";
-import type { CharacterRef, PlayerId } from "./engine";
+import { useMemo, useState } from "react";
+import { useGame, type GameConfig } from "./game/useGame";
+import { useHealthDeltas } from "./game/useHealthDeltas";
+import { canAttack as engineCanAttack, canPlayCard, canUseHeroPower, sameRef, CLASS_LABEL } from "./engine";
+import type { CharacterRef, GameState, Minion, PlayerId } from "./engine";
 import { HandCard } from "./components/HandCard";
 import { MinionView } from "./components/MinionView";
 import { HeroView } from "./components/HeroView";
+import { MulliganModal } from "./components/MulliganModal";
+import { SetupScreen } from "./components/SetupScreen";
+import type { HealthDelta } from "./components/FloatingNumber";
 
-function isTargeted(targets: CharacterRef[], ref: CharacterRef): boolean {
-  return targets.some((t) =>
-    t.kind === "hero" && ref.kind === "hero"
-      ? t.player === ref.player
-      : t.kind === "minion" && ref.kind === "minion" && t.instanceId === ref.instanceId,
+export function App() {
+  // `config` null => show the setup/deckbuilder screen.
+  const [config, setConfig] = useState<GameConfig | null>(null);
+  // Bumping this key remounts the game (fresh useGame state) for a rematch.
+  const [gameKey, setGameKey] = useState(0);
+
+  if (!config) return <SetupScreen onStart={setConfig} />;
+
+  return (
+    <GameView
+      key={gameKey}
+      config={config}
+      onRematch={() => setGameKey((k) => k + 1)}
+      onExit={() => setConfig(null)}
+    />
   );
 }
 
-export function App() {
-  const g = useGame();
+function GameView({ config, onRematch, onExit }: { config: GameConfig; onRematch: () => void; onExit: () => void }) {
+  const g = useGame(config);
   const { state } = g;
+  const deltas = useHealthDeltas(state);
   const player = state.players.player;
   const ai = state.players.ai;
 
@@ -25,11 +40,13 @@ export function App() {
   const turnLabel =
     state.phase === "gameOver"
       ? "Game Over"
-      : g.aiThinking
-        ? "Enemy is plotting…"
-        : g.isMyTurn
-          ? "Your Turn"
-          : "Enemy Turn";
+      : state.phase === "mulligan"
+        ? "Mulligan"
+        : g.aiThinking
+          ? "Enemy is plotting…"
+          : g.isMyTurn
+            ? "Your Turn"
+            : "Enemy Turn";
 
   return (
     <div className="app" onClick={g.clickBoard}>
@@ -38,71 +55,62 @@ export function App() {
           Town<span>stone</span>
         </h1>
         <div className={"turn-banner" + (g.isMyTurn ? " turn-banner--mine" : "")}>{turnLabel}</div>
-        <button type="button" className="btn btn--ghost" onClick={(e) => { e.stopPropagation(); g.newGame(); }}>
-          New Game
-        </button>
+        <div className="topbar__btns">
+          <button type="button" className="btn btn--ghost" onClick={(e) => { e.stopPropagation(); onRematch(); }}>
+            Rematch
+          </button>
+          <button type="button" className="btn btn--ghost" onClick={(e) => { e.stopPropagation(); onExit(); }}>
+            Main Menu
+          </button>
+        </div>
       </header>
 
       <main className="battlefield" onClick={(e) => e.stopPropagation()}>
-        {/* Enemy hero */}
         <HeroView
           hero={ai.hero}
           player="ai"
-          name="The Dark Wanderer"
+          name={`The Dark ${CLASS_LABEL[ai.hero.className]}`}
           mana={ai.mana}
           maxMana={ai.maxMana}
           deckCount={ai.deck.length}
           handCount={ai.hand.length}
           targetable={isTargeted(g.highlightedTargets, { kind: "hero", player: "ai" })}
+          delta={deltas.get("hero:ai")}
           onClick={() => g.clickHero("ai")}
         />
 
-        {/* Enemy board */}
-        <Board
-          owner="ai"
-          minions={ai.board}
-          highlightedTargets={g.highlightedTargets}
-          selectedAttackerId={g.selectedAttackerId}
-          state={state}
-          onMinionClick={g.clickMinion}
-        />
+        <Board owner="ai" minions={ai.board} g={g} state={state} deltas={deltas} />
 
         <div className="midline">
           <span className="midline__rune">✦ ✦ ✦</span>
         </div>
 
-        {/* Player board */}
-        <Board
-          owner="player"
-          minions={player.board}
-          highlightedTargets={g.highlightedTargets}
-          selectedAttackerId={g.selectedAttackerId}
-          state={state}
-          onMinionClick={g.clickMinion}
-        />
+        <Board owner="player" minions={player.board} g={g} state={state} deltas={deltas} />
 
-        {/* Player hero */}
         <HeroView
           hero={player.hero}
           player="player"
-          name="You"
+          name={`You — ${CLASS_LABEL[player.hero.className]}`}
           mana={player.mana}
           maxMana={player.maxMana}
           deckCount={player.deck.length}
           handCount={player.hand.length}
           targetable={isTargeted(g.highlightedTargets, { kind: "hero", player: "player" })}
+          delta={deltas.get("hero:player")}
+          canUsePower={g.isMyTurn && canUseHeroPower(state, "player")}
+          powerSelected={g.pending?.kind === "power"}
+          onUsePower={g.clickHeroPower}
           onClick={() => g.clickHero("player")}
         />
       </main>
 
-      {/* Player hand */}
       <section className="hand" onClick={(e) => e.stopPropagation()}>
         {player.hand.map((card) => (
           <HandCard
             key={card.instanceId}
             card={card}
             playable={g.isMyTurn && canPlayCard(state, "player", card.instanceId)}
-            selected={g.pendingPlayId === card.instanceId}
+            selected={g.pending?.kind === "card" && g.pending.instanceId === card.instanceId}
             onClick={() => g.clickHandCard(card.instanceId)}
           />
         ))}
@@ -117,26 +125,25 @@ export function App() {
             </div>
           ))}
         </div>
-        <button
-          type="button"
-          className="btn btn--primary"
-          disabled={!g.isMyTurn}
-          onClick={g.endMyTurn}
-        >
+        <button type="button" className="btn btn--primary" disabled={!g.isMyTurn} onClick={g.endMyTurn}>
           End Turn
         </button>
       </footer>
 
+      {state.phase === "mulligan" && (
+        <MulliganModal
+          hand={player.hand}
+          choices={g.mulliganChoices}
+          goingFirst={state.first === "player"}
+          onToggle={g.toggleMulligan}
+          onConfirm={g.confirmMulligan}
+        />
+      )}
+
       {state.phase === "gameOver" && (
         <div className="overlay" onClick={(e) => e.stopPropagation()}>
           <div className="overlay__panel">
-            <h2>
-              {state.winner === "player"
-                ? "Victory"
-                : state.winner === "ai"
-                  ? "Defeat"
-                  : "Draw"}
-            </h2>
+            <h2>{state.winner === "player" ? "Victory" : state.winner === "ai" ? "Defeat" : "Draw"}</h2>
             <p>
               {state.winner === "player"
                 ? "The Dark Wanderer falls before you."
@@ -144,9 +151,14 @@ export function App() {
                   ? "Darkness claims another hero…"
                   : "Both heroes are consumed."}
             </p>
-            <button type="button" className="btn btn--primary" onClick={g.newGame}>
-              Play Again
-            </button>
+            <div className="overlay__btns">
+              <button type="button" className="btn btn--primary" onClick={onRematch}>
+                Rematch
+              </button>
+              <button type="button" className="btn btn--ghost" onClick={onExit}>
+                Main Menu
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -154,16 +166,19 @@ export function App() {
   );
 }
 
-interface BoardProps {
-  owner: PlayerId;
-  minions: import("./engine").Minion[];
-  highlightedTargets: CharacterRef[];
-  selectedAttackerId: string | null;
-  state: import("./engine").GameState;
-  onMinionClick: (instanceId: string, owner: PlayerId) => void;
+function isTargeted(targets: CharacterRef[], ref: CharacterRef): boolean {
+  return targets.some((t) => sameRef(t, ref));
 }
 
-function Board({ owner, minions, highlightedTargets, selectedAttackerId, state, onMinionClick }: BoardProps) {
+interface BoardProps {
+  owner: PlayerId;
+  minions: Minion[];
+  g: ReturnType<typeof useGame>;
+  state: GameState;
+  deltas: Map<string, HealthDelta>;
+}
+
+function Board({ owner, minions, g, state, deltas }: BoardProps) {
   return (
     <div className={"board board--" + owner}>
       {minions.length === 0 && <span className="board__empty">— empty —</span>}
@@ -172,9 +187,10 @@ function Board({ owner, minions, highlightedTargets, selectedAttackerId, state, 
           key={m.instanceId}
           minion={m}
           canAttack={owner === "player" && engineCanAttack(state, "player", m.instanceId)}
-          selected={selectedAttackerId === m.instanceId}
-          targetable={isTargeted(highlightedTargets, { kind: "minion", instanceId: m.instanceId })}
-          onClick={() => onMinionClick(m.instanceId, owner)}
+          selected={g.selectedAttackerId === m.instanceId}
+          targetable={isTargeted(g.highlightedTargets, { kind: "minion", instanceId: m.instanceId })}
+          delta={deltas.get(m.instanceId)}
+          onClick={() => g.clickMinion(m.instanceId, owner)}
         />
       ))}
     </div>

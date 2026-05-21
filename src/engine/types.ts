@@ -10,7 +10,7 @@ export type PlayerId = "player" | "ai";
 
 export type CardType = "minion" | "spell";
 
-/** Diablo-flavored hero classes. Single shared card pool for milestone 1. */
+/** Diablo-flavored hero classes. */
 export type HeroClass =
   | "barbarian"
   | "sorceress"
@@ -18,7 +18,22 @@ export type HeroClass =
   | "demonhunter"
   | "neutral";
 
-export type Keyword = "taunt" | "charge" | "divineShield";
+/** The five playable classes (everything except the neutral pool). */
+export const PLAYABLE_CLASSES: Exclude<HeroClass, "neutral">[] = [
+  "barbarian",
+  "sorceress",
+  "necromancer",
+  "demonhunter",
+];
+
+/** Intrinsic keywords printed on a card. */
+export type Keyword =
+  | "taunt"
+  | "charge"
+  | "divineShield"
+  | "lifesteal"
+  | "poisonous"
+  | "windfury";
 
 /**
  * Where an effect's targets come from. "chosen" requires the controller to
@@ -47,8 +62,22 @@ export type Effect =
   | { kind: "damage"; selector: TargetSelector; amount: number }
   | { kind: "heal"; selector: TargetSelector; amount: number }
   | { kind: "buff"; selector: TargetSelector; attack: number; health: number }
+  | { kind: "armor"; selector: TargetSelector; amount: number }
+  | { kind: "mana"; amount: number }
+  | { kind: "freeze"; selector: TargetSelector }
   | { kind: "draw"; amount: number }
   | { kind: "summon"; cardId: string; count: number };
+
+/** A class-specific Hero Power, usable once per turn. */
+export interface HeroPower {
+  id: string;
+  name: string;
+  cost: number;
+  text: string;
+  effects: Effect[];
+  requiresTarget?: boolean;
+  targetFilter?: TargetFilter;
+}
 
 /** Static template defining a card. Many instances can share one definition. */
 export interface CardDef {
@@ -60,11 +89,17 @@ export interface CardDef {
   className: HeroClass;
   /** Diablo flavor blurb shown on hover/inspect. */
   flavor?: string;
+  /** Rare/legendary cards are limited to a single copy per deck. */
+  legendary?: boolean;
+  /** Cards (like The Coin) that should never appear in the deckbuilder. */
+  uncollectible?: boolean;
 
   // Minion stats
   attack?: number;
   health?: number;
   keywords?: Keyword[];
+  /** "Spell Damage +N": boosts the controller's spell damage while in play. */
+  spellDamage?: number;
 
   /** Resolved when the minion is played (battlecry) or the spell is cast. */
   onPlay?: Effect[];
@@ -91,10 +126,13 @@ export interface Minion {
   health: number;
   maxHealth: number;
   keywords: Keyword[];
+  spellDamage: number;
   divineShield: boolean;
+  frozen: boolean;
   /** Played this turn — cannot attack unless it has Charge. */
   summonedThisTurn: boolean;
-  hasAttacked: boolean;
+  /** Attacks used this turn (Windfury allows 2). */
+  attacksThisTurn: number;
   onDeath?: Effect[];
 }
 
@@ -103,6 +141,8 @@ export interface Hero {
   maxHealth: number;
   armor: number;
   className: HeroClass;
+  power: HeroPower;
+  powerUsedThisTurn: boolean;
 }
 
 export interface PlayerState {
@@ -114,13 +154,17 @@ export interface PlayerState {
   deck: CardInstance[];
   board: Minion[];
   fatigue: number;
+  /** Whether this player has finished their opening-hand mulligan. */
+  mulliganed: boolean;
 }
 
-export type GamePhase = "playing" | "gameOver";
+export type GamePhase = "mulligan" | "playing" | "gameOver";
 
 export interface GameState {
   players: Record<PlayerId, PlayerState>;
   current: PlayerId;
+  /** Whoever takes the first turn after the mulligan. */
+  first: PlayerId;
   turn: number;
   phase: GamePhase;
   winner: PlayerId | null;
