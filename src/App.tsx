@@ -109,8 +109,8 @@ function ConnectionScreen({ status, onExit }: { status: OnlineStatus; onExit: ()
     mulligan: "Match found! Preparing the battle…",
     playing: "Entering the battle…",
     gameOver: "The battle has ended.",
-    opponentLeft: "No opponent could be found.",
-    error: "Could not reach the server. Make sure it is running (npm run server).",
+    opponentLeft: "Your opponent has left the battle.",
+    error: "Couldn't reach a game server.",
   };
   return (
     <div className="setup conn-screen">
@@ -118,9 +118,16 @@ function ConnectionScreen({ status, onExit }: { status: OnlineStatus; onExit: ()
         Town<span>stone</span>
       </h1>
       <p className="conn-screen__status">{message[status]}</p>
+      {status === "error" && (
+        <p className="conn-screen__hint">
+          Online play needs the WebSocket server running. It isn't hosted on this
+          public site — to play online, run it locally with <code>npm run dev:all</code>
+          and open <code>http://localhost:5173</code> in two tabs.
+        </p>
+      )}
       {(status === "waiting" || status === "connecting") && <div className="conn-spinner" aria-hidden />}
       <button type="button" className="btn btn--ghost" onClick={onExit}>
-        Cancel
+        {status === "error" || status === "opponentLeft" ? "Back" : "Cancel"}
       </button>
     </div>
   );

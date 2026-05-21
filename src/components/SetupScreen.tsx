@@ -9,6 +9,7 @@ import {
 } from "../engine";
 import type { AiDifficulty, HeroClass } from "../engine";
 import { DECK_SIZE, copyLimit, loadDeck, saveDeck } from "../game/deckStore";
+import { onlineReachable } from "../net/connection";
 import type { GameConfig } from "../game/useGame";
 import type { OnlineConfig } from "../game/useOnlineGame";
 
@@ -97,6 +98,14 @@ export function SetupScreen({ onStartLocal, onStartOnline }: Props) {
           🌐 Play Online
         </button>
       </div>
+
+      {mode === "online" && !onlineReachable() && (
+        <div className="online-warning">
+          ⚠ Online play isn't available on this hosted site (no game server). To play
+          online, run it locally: <code>npm run dev:all</code>, then open{" "}
+          <code>http://localhost:5173</code> in two browser tabs.
+        </div>
+      )}
 
       <div className="class-picker">
         {PLAYABLE_CLASSES.map((c) => (

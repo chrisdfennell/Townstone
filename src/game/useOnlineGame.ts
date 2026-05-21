@@ -48,6 +48,8 @@ export function useOnlineGame(config: OnlineConfig): OnlineController {
   // Locks input between sending an action and receiving the authoritative reply.
   const [awaiting, setAwaiting] = useState(false);
   const conn = useRef<Connection | null>(null);
+  // Did we ever get into a game? Distinguishes "opponent left" from "couldn't connect".
+  const gotState = useRef(false);
 
   useEffect(() => {
     const c = new Connection({
@@ -61,6 +63,7 @@ export function useOnlineGame(config: OnlineConfig): OnlineController {
             setOpponentName(msg.opponentName);
             break;
           case "state":
+            gotState.current = true;
             setState(msg.state);
             setAwaiting(false);
             setStatus(msg.state.phase === "mulligan" ? "mulligan" : msg.state.phase === "gameOver" ? "gameOver" : "playing");
@@ -73,8 +76,9 @@ export function useOnlineGame(config: OnlineConfig): OnlineController {
             break;
         }
       },
-      onClose: () => setStatus((s) => (s === "gameOver" ? s : "opponentLeft")),
-      onError: () => setStatus((s) => (s === "connecting" ? "error" : s)),
+      // Closed/failed before any game state means we never reached the server.
+      onClose: () => setStatus((s) => (s === "gameOver" ? s : gotState.current ? "opponentLeft" : "error")),
+      onError: () => setStatus((s) => (gotState.current ? s : "error")),
     });
     conn.current = c;
     return () => {
