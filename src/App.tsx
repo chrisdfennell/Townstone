@@ -25,7 +25,14 @@ export function App() {
     );
   }
   if (mode === "online" && onlineConfig) {
-    return <OnlineGame key={gameKey} config={onlineConfig} onExit={() => setMode("setup")} />;
+    return (
+      <OnlineGame
+        key={gameKey}
+        config={onlineConfig}
+        onExit={() => setMode("setup")}
+        onRematch={() => setGameKey((k) => k + 1)}
+      />
+    );
   }
 
   return (
@@ -58,13 +65,15 @@ function LocalGame({ config, onExit, onRematch }: { config: GameConfig; onExit: 
   );
 }
 
-function OnlineGame({ config, onExit }: { config: OnlineConfig; onExit: () => void }) {
+function OnlineGame({ config, onExit, onRematch }: { config: OnlineConfig; onExit: () => void; onRematch: () => void }) {
   const ctrl = useOnlineGame(config);
 
   if (!ctrl.state) return <ConnectionScreen status={ctrl.status} onExit={onExit} />;
 
   const gameCtrl = { ...ctrl, state: ctrl.state } as UseGame;
   const showMulligan = ctrl.status === "mulligan" && !ctrl.mulliganSubmitted;
+  // Only offer rematch (re-queue) once the match has concluded.
+  const ended = ctrl.state.phase === "gameOver" || ctrl.status === "opponentLeft";
 
   let banner = null;
   if (ctrl.status === "opponentLeft" && ctrl.state.phase !== "gameOver") {
@@ -73,13 +82,18 @@ function OnlineGame({ config, onExit }: { config: OnlineConfig; onExit: () => vo
         <div className="overlay__panel">
           <h2>Opponent Left</h2>
           <p>Your foe has fled the battle.</p>
-          <button type="button" className="btn btn--primary" onClick={onExit}>
-            Main Menu
-          </button>
+          <div className="overlay__btns">
+            <button type="button" className="btn btn--primary" onClick={onRematch}>
+              Find New Match
+            </button>
+            <button type="button" className="btn btn--ghost" onClick={onExit}>
+              Main Menu
+            </button>
+          </div>
         </div>
       </div>
     );
-  } else if (showMulligan === false && ctrl.status === "mulligan" && ctrl.mulliganSubmitted) {
+  } else if (ctrl.status === "mulligan" && ctrl.mulliganSubmitted) {
     banner = (
       <div className="overlay">
         <div className="overlay__panel">
@@ -97,6 +111,7 @@ function OnlineGame({ config, onExit }: { config: OnlineConfig; onExit: () => vo
       enemyName={ctrl.opponentName}
       showMulligan={showMulligan}
       onExit={onExit}
+      onRematch={ended ? onRematch : undefined}
       banner={banner}
     />
   );

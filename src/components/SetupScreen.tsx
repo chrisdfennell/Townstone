@@ -9,6 +9,7 @@ import {
 } from "../engine";
 import type { AiDifficulty, HeroClass } from "../engine";
 import { DECK_SIZE, copyLimit, loadDeck, saveDeck } from "../game/deckStore";
+import { HelpButton } from "./HelpButton";
 import { onlineReachable } from "../net/connection";
 import type { GameConfig } from "../game/useGame";
 import type { OnlineConfig } from "../game/useOnlineGame";
@@ -77,6 +78,9 @@ export function SetupScreen({ onStartLocal, onStartOnline }: Props) {
 
   return (
     <div className="setup">
+      <div className="setup__help">
+        <HelpButton />
+      </div>
       <h1 className="logo logo--big">
         Town<span>stone</span>
       </h1>

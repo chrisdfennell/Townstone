@@ -1,5 +1,7 @@
 import type { Minion } from "../engine";
+import { getCardDef } from "../engine";
 import { FloatingNumber, type HealthDelta } from "./FloatingNumber";
+import { CardTip } from "./CardTip";
 
 interface Props {
   minion: Minion;
@@ -27,9 +29,15 @@ export function MinionView({ minion, canAttack, selected, targetable, delta, onC
   if (minion.frozen) classes.push("minion--frozen");
 
   const damaged = minion.health < minion.maxHealth;
+  const def = getCardDef(minion.defId);
 
   return (
-    <button type="button" className={classes.join(" ")} onClick={onClick} title={minion.name}>
+    <button
+      type="button"
+      className={classes.join(" ")}
+      onClick={onClick}
+      data-anchor={`minion:${minion.instanceId}`}
+    >
       {minion.spellDamage > 0 && <span className="minion__spelldmg" title="Spell Damage">✦+{minion.spellDamage}</span>}
       <span className="minion__name">{minion.name}</span>
       <span className="minion__keywords">
@@ -45,6 +53,7 @@ export function MinionView({ minion, canAttack, selected, targetable, delta, onC
       </span>
       {minion.frozen && <span className="minion__ice" aria-hidden />}
       <FloatingNumber delta={delta} />
+      <CardTip name={def.name} text={def.text} flavor={def.flavor} keywords={minion.keywords} spellDamage={minion.spellDamage} />
     </button>
   );
 }

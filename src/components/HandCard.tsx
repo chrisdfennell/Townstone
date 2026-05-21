@@ -1,5 +1,6 @@
 import type { CardInstance } from "../engine";
 import { getCardDef } from "../engine";
+import { CardTip } from "./CardTip";
 
 interface Props {
   card: CardInstance;
@@ -27,7 +28,7 @@ export function HandCard({ card, playable, selected, onClick }: Props) {
       type="button"
       className={classes.join(" ")}
       onClick={onClick}
-      title={def.flavor ?? def.text}
+      data-anchor={`hand:${card.instanceId}`}
     >
       <span className="card__cost">{def.cost}</span>
       <span className="card__class" aria-hidden>
@@ -42,6 +43,7 @@ export function HandCard({ card, playable, selected, onClick }: Props) {
         </span>
       )}
       {def.type === "spell" && <span className="card__type-badge">Spell</span>}
+      <CardTip name={def.name} text={def.text} flavor={def.flavor} keywords={def.keywords ?? []} spellDamage={def.spellDamage} />
     </button>
   );
 }

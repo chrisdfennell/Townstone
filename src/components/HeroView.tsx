@@ -66,6 +66,7 @@ export function HeroView({
         type="button"
         className={powerClasses.join(" ")}
         title={`${hero.power.name} (${hero.power.cost}) — ${hero.power.text}`}
+        data-anchor={player === "player" ? "heropower-self" : undefined}
         disabled={player === "ai" || !onUsePower}
         onClick={(e) => {
           e.stopPropagation();

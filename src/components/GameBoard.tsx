@@ -8,6 +8,8 @@ import { HandCard } from "./HandCard";
 import { MinionView } from "./MinionView";
 import { HeroView } from "./HeroView";
 import { MulliganModal } from "./MulliganModal";
+import { HelpButton } from "./HelpButton";
+import { TargetingArrow } from "./TargetingArrow";
 import type { HealthDelta } from "./FloatingNumber";
 
 interface Props {
@@ -29,6 +31,16 @@ export function GameBoard({ ctrl, selfName, enemyName, showMulligan, onExit, onR
   const ai = state.players.ai;
   const recentLog = useMemo(() => state.log.slice(-6).reverse(), [state.log]);
 
+  // Source element for the aiming arrow, based on the current selection.
+  const aimSelector =
+    ctrl.selectedAttackerId != null
+      ? `[data-anchor="minion:${ctrl.selectedAttackerId}"]`
+      : ctrl.pending?.kind === "card"
+        ? `[data-anchor="hand:${ctrl.pending.instanceId}"]`
+        : ctrl.pending?.kind === "power"
+          ? `[data-anchor="heropower-self"]`
+          : null;
+
   const turnLabel =
     state.phase === "gameOver"
       ? "Game Over"
@@ -48,6 +60,7 @@ export function GameBoard({ ctrl, selfName, enemyName, showMulligan, onExit, onR
         </h1>
         <div className={"turn-banner" + (ctrl.isMyTurn ? " turn-banner--mine" : "")}>{turnLabel}</div>
         <div className="topbar__btns">
+          <HelpButton />
           {onRematch && (
             <button type="button" className="btn btn--ghost" onClick={(e) => { e.stopPropagation(); onRematch(); }}>
               Rematch
@@ -159,6 +172,7 @@ export function GameBoard({ ctrl, selfName, enemyName, showMulligan, onExit, onR
         </div>
       )}
 
+      {aimSelector && <TargetingArrow anchorSelector={aimSelector} />}
       {banner}
     </div>
   );
