@@ -4,6 +4,7 @@ import type { HeroClass } from "../engine";
 import { BOSSES, nextBossIndex } from "../game/campaign";
 import { getBeatenBosses } from "../game/collection";
 import { HelpButton } from "./HelpButton";
+import { MuteButton } from "./MuteButton";
 
 interface Props {
   /** Card id just unlocked this session (shows a banner), if any. */
@@ -21,6 +22,7 @@ export function CampaignScreen({ justUnlocked, onFight, onExit }: Props) {
   return (
     <div className="setup campaign">
       <div className="setup__help">
+        <MuteButton />
         <HelpButton />
       </div>
       <h1 className="logo logo--big">

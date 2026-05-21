@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import type { Minion } from "../engine";
 import { getCardDef } from "../engine";
 import { FloatingNumber, type HealthDelta } from "./FloatingNumber";
@@ -21,15 +22,28 @@ const KEYWORD_BADGES: Array<[Minion["keywords"][number], string, string]> = [
 ];
 
 export function MinionView({ minion, canAttack, selected, targetable, delta, onClick }: Props) {
+  const def = getCardDef(minion.defId);
+
+  // Briefly shake when this minion takes damage.
+  const [hurt, setHurt] = useState(0);
+  useEffect(() => {
+    if (delta && delta.delta < 0) {
+      setHurt(delta.nonce);
+      const t = window.setTimeout(() => setHurt(0), 320);
+      return () => window.clearTimeout(t);
+    }
+  }, [delta]);
+
   const classes = ["minion"];
   if (canAttack) classes.push("minion--ready");
   if (selected) classes.push("minion--selected");
   if (targetable) classes.push("minion--targetable");
   if (minion.divineShield) classes.push("minion--shield");
   if (minion.frozen) classes.push("minion--frozen");
+  if (def.legendary) classes.push("minion--legendary");
+  if (hurt) classes.push("minion--hit");
 
   const damaged = minion.health < minion.maxHealth;
-  const def = getCardDef(minion.defId);
 
   return (
     <button

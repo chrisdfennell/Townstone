@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import type { CardInstance, Hero, PlayerId } from "../engine";
 import { getCardDef } from "../engine";
 import { FloatingNumber, type HealthDelta } from "./FloatingNumber";
@@ -50,8 +51,18 @@ export function HeroView({
   onUsePower,
   onClick,
 }: Props) {
+  const [hurt, setHurt] = useState(0);
+  useEffect(() => {
+    if (delta && delta.delta < 0) {
+      setHurt(delta.nonce);
+      const t = window.setTimeout(() => setHurt(0), 360);
+      return () => window.clearTimeout(t);
+    }
+  }, [delta]);
+
   const classes = ["hero", `hero--${player}`];
   if (targetable) classes.push("hero--targetable");
+  if (hurt) classes.push("hero--hit");
 
   const powerClasses = ["heropower"];
   if (canUsePower) powerClasses.push("heropower--ready");

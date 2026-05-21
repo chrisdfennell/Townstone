@@ -25,6 +25,7 @@ export function HandCard({ card, playable, selected, onClick }: Props) {
   const classes = ["card", `card--${def.type}`];
   if (playable) classes.push("card--playable");
   if (selected) classes.push("card--selected");
+  if (def.legendary) classes.push("card--legendary");
 
   return (
     <button
@@ -37,6 +38,7 @@ export function HandCard({ card, playable, selected, onClick }: Props) {
       <span className="card__class" aria-hidden>
         {CLASS_GLYPH[def.className] ?? "◆"}
       </span>
+      {def.legendary && <span className="card__gem" aria-hidden>★</span>}
       <span className="card__name">{def.name}</span>
       <span className="card__text">{def.text || (def.type === "minion" ? "" : "")}</span>
       {def.type === "minion" && (

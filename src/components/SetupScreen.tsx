@@ -13,6 +13,7 @@ import { DECK_SIZE, copyLimit, loadDeck, saveDeck } from "../game/deckStore";
 import { isCardUnlocked } from "../game/collection";
 import { REWARD_SOURCE } from "../game/campaign";
 import { HelpButton } from "./HelpButton";
+import { MuteButton } from "./MuteButton";
 import { onlineReachable } from "../net/connection";
 import type { GameConfig } from "../game/useGame";
 import type { OnlineConfig } from "../game/useOnlineGame";
@@ -96,6 +97,7 @@ export function SetupScreen({ onStartLocal, onStartOnline, onCampaign }: Props) 
   return (
     <div className="setup">
       <div className="setup__help">
+        <MuteButton />
         <HelpButton />
       </div>
       <h1 className="logo logo--big">

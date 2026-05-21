@@ -96,6 +96,8 @@ game is fully reproducible from `seed + action list`.
 - [x] Mulligan / opening-hand selection + "The Coin"
 - [x] Deckbuilder and collection (per-class, saved to localStorage)
 - [x] Juice: floating damage numbers, minion-summon + freeze animations
+- [x] Atmosphere: procedural Web-Audio SFX (no asset files) + mute, legendary
+      frames, hit shakes, low-health vignette
 - [x] Secrets (trigger on the opponent's turn) and Discover (choose 1 of 3)
 - [x] Secret-aware AI — plans blind to your Secrets and baits them with cheap actions
 - [x] Deathrattle chains + legendaries

@@ -1403,3 +1403,60 @@ body {
   color: var(--text-dim);
   font-size: 14px;
 }
+
+/* ---- Legendary framing ---- */
+.card--legendary {
+  border-color: var(--gold);
+  box-shadow: 0 6px 14px var(--shadow), inset 0 0 18px rgba(201, 162, 39, 0.18);
+}
+.card__gem {
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: var(--gold);
+  font-size: 11px;
+  text-shadow: 0 0 6px rgba(201, 162, 39, 0.8);
+}
+.minion--legendary {
+  border-color: var(--gold);
+  box-shadow: 0 4px 10px var(--shadow), 0 0 12px rgba(201, 162, 39, 0.4);
+}
+
+/* ---- Hit reactions ---- */
+.hero--hit {
+  animation: shake 0.34s ease;
+}
+.minion--hit {
+  animation: shake 0.3s ease;
+}
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-5px) rotate(-2deg); }
+  40% { transform: translateX(5px) rotate(2deg); }
+  60% { transform: translateX(-3px); }
+  80% { transform: translateX(3px); }
+}
+
+/* ---- Low-health vignette ---- */
+.vignette {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 40;
+  box-shadow: inset 0 0 160px 40px rgba(160, 12, 12, 0.55);
+  animation: pulse-vignette 1.6s ease-in-out infinite;
+}
+@keyframes pulse-vignette {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 0.9; }
+}
+
+/* ---- Turn banner flourish ---- */
+.turn-banner--mine {
+  animation: banner-in 0.4s ease;
+}
+@keyframes banner-in {
+  from { transform: scale(0.92); opacity: 0.5; }
+  to { transform: scale(1); opacity: 1; }
+}
