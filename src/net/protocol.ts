@@ -21,6 +21,7 @@ export type ClientMessage =
   | { t: "play"; instanceId: string; target?: CharacterRef }
   | { t: "power"; target?: CharacterRef }
   | { t: "attack"; attackerId: string; target: CharacterRef }
+  | { t: "discover"; index: number }
   | { t: "endTurn" }
   | { t: "leave" };
 

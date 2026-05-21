@@ -25,5 +25,7 @@ export const HOW_TO_PLAY: string[] = [
   "Click a card to play it. Targeted spells then ask you to click a target.",
   "Click your minion (glowing gold), then click an enemy to attack. Minions can't attack the turn they're summoned unless they have Charge.",
   "Your Hero Power (the round button by your hero) costs 2 mana and can be used once per turn.",
+  "Discover lets you pick 1 of 3 offered cards to add to your hand.",
+  "Secrets are spells that hide face-down (gold runes by your hero) and trigger automatically on your opponent's turn.",
   "Reduce the enemy hero from 30 Health to 0 to win. Armor absorbs damage before Health.",
 ];

@@ -1,4 +1,5 @@
-import type { Hero, PlayerId } from "../engine";
+import type { CardInstance, Hero, PlayerId } from "../engine";
+import { getCardDef } from "../engine";
 import { FloatingNumber, type HealthDelta } from "./FloatingNumber";
 
 interface Props {
@@ -11,6 +12,10 @@ interface Props {
   handCount: number;
   targetable: boolean;
   delta?: HealthDelta;
+  /** Secrets in play for this hero. */
+  secrets?: CardInstance[];
+  /** Reveal secret identities (true for your own hero only). */
+  secretsRevealed?: boolean;
   /** Player-only: hero power interactivity. */
   canUsePower?: boolean;
   powerSelected?: boolean;
@@ -38,6 +43,8 @@ export function HeroView({
   handCount,
   targetable,
   delta,
+  secrets = [],
+  secretsRevealed = false,
   canUsePower,
   powerSelected,
   onUsePower,
@@ -81,6 +88,24 @@ export function HeroView({
         </span>
         <span className="heropower__cost">{hero.power.cost}</span>
       </button>
+
+      {secrets.length > 0 && (
+        <div className="secrets" title="Secrets">
+          {secrets.map((s) => {
+            const known = secretsRevealed && s.defId !== "__hidden__";
+            const def = known ? getCardDef(s.defId) : null;
+            return (
+              <span
+                key={s.instanceId}
+                className={"secret-rune" + (known ? " secret-rune--known" : "")}
+                title={def ? `${def.name} — ${def.text}` : "A hidden Secret"}
+              >
+                ✦
+              </span>
+            );
+          })}
+        </div>
+      )}
 
       <div className="hero__meta">
         <span className="mana" title="Mana">

@@ -1,6 +1,7 @@
 import {
   attack,
   beginPlay,
+  chooseDiscover,
   classDeck,
   collectibleCards,
   createGame,
@@ -82,6 +83,10 @@ export class Match {
       }
       case "attack": {
         this.state = attack(this.state, seat, msg.attackerId, refFromViewer(msg.target, seat));
+        break;
+      }
+      case "discover": {
+        this.state = chooseDiscover(this.state, seat, msg.index);
         break;
       }
       case "endTurn": {

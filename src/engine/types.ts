@@ -64,6 +64,9 @@ export type TargetFilter =
   | "enemyMinion"
   | "friendlyMinion";
 
+/** Pool a Discover effect draws its three choices from. */
+export type DiscoverPool = "any" | "minion" | "spell";
+
 export type Effect =
   | { kind: "damage"; selector: TargetSelector; amount: number }
   | { kind: "heal"; selector: TargetSelector; amount: number }
@@ -78,7 +81,32 @@ export type Effect =
   /** Destroy the target minion(s) outright (ignores Divine Shield). */
   | { kind: "destroy"; selector: TargetSelector }
   | { kind: "draw"; amount: number }
+  /** Offer the controller a choice of three cards to add to hand. */
+  | { kind: "discover"; pool: DiscoverPool }
   | { kind: "summon"; cardId: string; count: number };
+
+/** When a Secret triggers, reacting to the opponent's action. */
+export type SecretTrigger = "onSpellCast" | "onMinionPlayed" | "onHeroAttacked";
+
+/** The concrete behavior of each Secret. */
+export type SecretKind =
+  | "counterspell" // negate the cast spell
+  | "iceBarrier" // gain 8 Armor when your hero is attacked
+  | "vaporize" // destroy the attacker when your hero is attacked
+  | "mirrorEntity" // summon a copy of the minion the opponent played
+  | "repentance"; // reduce the played minion's Health to 1
+
+export interface SecretDef {
+  trigger: SecretTrigger;
+  kind: SecretKind;
+}
+
+/** A pending Discover choice that pauses the game until resolved. */
+export interface PendingChoice {
+  player: PlayerId;
+  /** Card definition ids on offer (redacted to [] for the opponent's view). */
+  options: string[];
+}
 
 /** A class-specific Hero Power, usable once per turn. */
 export interface HeroPower {
@@ -117,6 +145,8 @@ export interface CardDef {
   onPlay?: Effect[];
   /** Resolved when the minion dies. */
   onDeath?: Effect[];
+  /** Marks a spell as a Secret: it hides face-down and triggers later. */
+  secret?: SecretDef;
 
   /** True when onPlay contains a "chosen" effect and a target must be picked. */
   requiresTarget?: boolean;
@@ -165,6 +195,8 @@ export interface PlayerState {
   hand: CardInstance[];
   deck: CardInstance[];
   board: Minion[];
+  /** Face-down Secrets in play (identities redacted from the opponent). */
+  secrets: CardInstance[];
   fatigue: number;
   /** Whether this player has finished their opening-hand mulligan. */
   mulliganed: boolean;
@@ -181,6 +213,8 @@ export interface GameState {
   phase: GamePhase;
   winner: PlayerId | null;
   log: string[];
+  /** Set while a Discover choice is open; blocks all other actions. */
+  pendingChoice: PendingChoice | null;
   /** Monotonic counter used to mint unique instance ids. */
   nextInstanceId: number;
   /** Seedable RNG state for deterministic, replayable games. */

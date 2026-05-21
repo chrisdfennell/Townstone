@@ -9,6 +9,7 @@ import {
   useHeroPower,
   canUseHeroPower,
   canPlayCard,
+  chooseDiscover,
   findMinion,
   RULES,
 } from "./engine";
@@ -206,6 +207,79 @@ describe("new effects & classes", () => {
     const m = findMinion(after, "m1")!;
     expect(m.divineShield).toBe(true);
     expect(m.keywords).toContain("divineShield");
+  });
+});
+
+describe("Discover", () => {
+  it("opens a 3-card choice that blocks other actions until resolved", () => {
+    const s = structuredClone(started({}));
+    s.players.player.mana = 10;
+    s.players.player.hand.push({ instanceId: "hc1", defId: "horadric_cache" });
+    const after = playCard(s, "player", "hc1");
+    expect(after.pendingChoice?.player).toBe("player");
+    expect(after.pendingChoice?.options.length).toBe(3);
+    // Other actions are blocked while choosing.
+    const other = after.players.player.hand[0];
+    if (other) expect(canPlayCard(after, "player", other.instanceId)).toBe(false);
+
+    const picked = after.pendingChoice!.options[1];
+    const resolved = chooseDiscover(after, "player", 1);
+    expect(resolved.pendingChoice).toBeNull();
+    expect(resolved.players.player.hand.some((c) => c.defId === picked)).toBe(true);
+  });
+});
+
+describe("Secrets", () => {
+  function withAiSecret(secretId: string, setup: (s: GameState) => void): GameState {
+    const s = structuredClone(started({}));
+    s.players.player.mana = 10;
+    s.players.ai.secrets.push({ instanceId: "sec1", defId: secretId });
+    setup(s);
+    return s;
+  }
+
+  it("Counterspell negates the opponent's spell", () => {
+    const s = withAiSecret("counterspell", (s) => {
+      s.players.player.hand.push({ instanceId: "fb1", defId: "firebolt" });
+    });
+    const after = playCard(s, "player", "fb1", { target: { kind: "hero", player: "ai" } });
+    expect(after.players.ai.hero.health).toBe(30); // spell countered
+    expect(after.players.ai.secrets.length).toBe(0); // secret consumed
+  });
+
+  it("Mirror Entity copies a played minion for its owner", () => {
+    const s = withAiSecret("mirror_entity", (s) => {
+      s.players.player.hand.push({ instanceId: "imp1", defId: "fallen_imp" });
+    });
+    const after = playCard(s, "player", "imp1");
+    expect(after.players.ai.board.some((m) => m.defId === "fallen_imp")).toBe(true);
+  });
+
+  it("Repentance reduces a played minion's Health to 1", () => {
+    const s = withAiSecret("repentance", (s) => {
+      s.players.player.hand.push({ instanceId: "ag1", defId: "ancient_guardian" });
+    });
+    const after = playCard(s, "player", "ag1");
+    const mine = after.players.player.board.find((m) => m.defId === "ancient_guardian")!;
+    expect(mine.health).toBe(1);
+  });
+
+  it("Ice Barrier grants 8 Armor when the hero is attacked", () => {
+    const s = withAiSecret("ice_barrier", (s) => {
+      s.players.player.board.push(craftMinion({ instanceId: "atk", attack: 3, health: 3 }));
+    });
+    const after = attack(s, "player", "atk", { kind: "hero", player: "ai" });
+    expect(after.players.ai.hero.armor).toBe(5); // 8 armor minus 3 damage
+    expect(after.players.ai.hero.health).toBe(30);
+  });
+
+  it("Bladed Trap (Vaporize) destroys the attacker", () => {
+    const s = withAiSecret("bladed_trap", (s) => {
+      s.players.player.board.push(craftMinion({ instanceId: "atk", attack: 4, health: 4 }));
+    });
+    const after = attack(s, "player", "atk", { kind: "hero", player: "ai" });
+    expect(findMinion(after, "atk")).toBeUndefined();
+    expect(after.players.ai.hero.health).toBe(30);
   });
 });
 

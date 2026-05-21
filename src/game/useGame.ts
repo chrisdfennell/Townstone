@@ -5,6 +5,7 @@ import {
   canAttack,
   canPlayCard,
   canUseHeroPower,
+  chooseDiscover,
   chooseMulligan,
   createGame,
   endTurn,
@@ -50,6 +51,7 @@ export interface UseGame {
   endMyTurn(): void;
   toggleMulligan(instanceId: string): void;
   confirmMulligan(): void;
+  chooseDiscover(index: number): void;
   cancelSelection(): void;
 }
 
@@ -213,6 +215,14 @@ export function useGame(config: GameConfig): UseGame {
     setState(s);
   }, [state, mulliganChoices]);
 
+  const chooseDiscoverOption = useCallback(
+    (index: number) => {
+      if (state.pendingChoice?.player !== "player") return;
+      setState(chooseDiscover(state, "player", index));
+    },
+    [state],
+  );
+
   return {
     state,
     aiThinking,
@@ -229,6 +239,7 @@ export function useGame(config: GameConfig): UseGame {
     endMyTurn,
     toggleMulligan,
     confirmMulligan,
+    chooseDiscover: chooseDiscoverOption,
     cancelSelection: clearSelection,
   };
 }

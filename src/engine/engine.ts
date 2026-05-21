@@ -11,15 +11,17 @@ import type {
   TargetFilter,
   TargetSelector,
 } from "./types";
-import { getCardDef } from "./cards";
+import { collectibleCards, getCardDef } from "./cards";
 import { heroPowerFor } from "./heroes";
 import { nextInt, shuffle } from "./rng";
+import type { DiscoverPool, SecretKind, SecretTrigger } from "./types";
 
 export const RULES = {
   startingHealth: 30,
   maxMana: 10,
   maxHandSize: 10,
   maxBoardSize: 7,
+  maxSecrets: 5,
   startingHandFirst: 3,
   startingHandSecond: 4,
 } as const;
@@ -54,6 +56,7 @@ function emptyPlayer(id: PlayerId, className: PlayerState["hero"]["className"]):
     hand: [],
     deck: [],
     board: [],
+    secrets: [],
     fatigue: 0,
     mulliganed: false,
   };
@@ -83,6 +86,7 @@ export function createGame(opts: NewGameOptions): GameState {
     phase: "mulligan",
     winner: null,
     log: [],
+    pendingChoice: null,
     nextInstanceId: 1,
     rngState: opts.seed ?? Math.floor(Math.random() * 2 ** 31),
   };
@@ -173,7 +177,7 @@ function beginTurn(state: GameState, playerId: PlayerId): void {
 }
 
 export function endTurn(state: GameState, playerId: PlayerId): GameState {
-  if (state.phase !== "playing" || state.current !== playerId) return state;
+  if (state.phase !== "playing" || state.current !== playerId || state.pendingChoice) return state;
   const next = clone(state);
   // Thaw the ending player's frozen minions — they were locked for this turn.
   for (const m of next.players[playerId].board) m.frozen = false;
@@ -223,13 +227,17 @@ export interface PlayOptions {
 }
 
 export function canPlayCard(state: GameState, playerId: PlayerId, instanceId: string): boolean {
-  if (state.phase !== "playing" || state.current !== playerId) return false;
+  if (state.phase !== "playing" || state.current !== playerId || state.pendingChoice) return false;
   const p = state.players[playerId];
   const card = p.hand.find((c) => c.instanceId === instanceId);
   if (!card) return false;
   const def = getCardDef(card.defId);
   if (def.cost > p.mana) return false;
   if (def.type === "minion" && p.board.length >= RULES.maxBoardSize) return false;
+  if (def.secret) {
+    if (p.secrets.length >= RULES.maxSecrets) return false;
+    if (p.secrets.some((s) => s.defId === def.id)) return false; // no duplicate Secrets
+  }
   if (def.type === "spell" && def.requiresTarget && validTargets(state, playerId, def.targetFilter).length === 0) {
     return false;
   }
@@ -251,6 +259,13 @@ export function playCard(
 
   p.mana -= def.cost;
   p.hand.splice(idx, 1);
+  const enemy = opponentOf(playerId);
+
+  if (def.secret) {
+    p.secrets.push(card);
+    log(next, `${who(playerId)} casts a Secret.`);
+    return next;
+  }
 
   if (def.type === "minion") {
     const minion = createMinion(next, def);
@@ -258,9 +273,13 @@ export function playCard(
     p.board.splice(pos, 0, minion);
     log(next, `${who(playerId)} plays ${def.name}.`);
     if (def.onPlay) resolveEffects(next, def.onPlay, playerId, { target: opts.target, isSpell: false });
+    // Opponent's Secrets may react to a minion entering play.
+    fireSecrets(next, enemy, "onMinionPlayed", { minionId: minion.instanceId });
   } else {
     log(next, `${who(playerId)} casts ${def.name}.`);
-    if (def.onPlay) resolveEffects(next, def.onPlay, playerId, { target: opts.target, isSpell: true });
+    // A Secret may counter the spell before it resolves.
+    const negated = fireSecrets(next, enemy, "onSpellCast", {});
+    if (!negated && def.onPlay) resolveEffects(next, def.onPlay, playerId, { target: opts.target, isSpell: true });
   }
 
   cleanupDeaths(next);
@@ -296,7 +315,7 @@ function clampPosition(pos: number | undefined, len: number): number {
 // ---------------------------------------------------------------------------
 
 export function canUseHeroPower(state: GameState, playerId: PlayerId): boolean {
-  if (state.phase !== "playing" || state.current !== playerId) return false;
+  if (state.phase !== "playing" || state.current !== playerId || state.pendingChoice) return false;
   const p = state.players[playerId];
   if (p.hero.powerUsedThisTurn) return false;
   if (p.hero.power.cost > p.mana) return false;
@@ -341,6 +360,11 @@ function resolveEffect(state: GameState, effect: Effect, controller: PlayerId, c
     case "draw":
       draw(state, controller, effect.amount);
       break;
+    case "discover": {
+      const options = discoverOptions(state, controller, effect.pool);
+      if (options.length > 0) state.pendingChoice = { player: controller, options };
+      break;
+    }
     case "mana":
       state.players[controller].mana += effect.amount;
       break;
@@ -451,6 +475,110 @@ function resolveSelector(
 }
 
 // ---------------------------------------------------------------------------
+// Discover
+// ---------------------------------------------------------------------------
+
+function discoverOptions(state: GameState, controller: PlayerId, pool: DiscoverPool): string[] {
+  const cls = state.players[controller].hero.className;
+  let cards = collectibleCards().filter((c) => c.className === cls || c.className === "neutral");
+  if (pool === "minion") cards = cards.filter((c) => c.type === "minion");
+  if (pool === "spell") cards = cards.filter((c) => c.type === "spell");
+
+  const chosen: string[] = [];
+  const used = new Set<number>();
+  let guard = 0;
+  while (chosen.length < 3 && used.size < cards.length && guard < 200) {
+    const r = nextInt(state.rngState, cards.length);
+    state.rngState = r.state;
+    if (!used.has(r.value)) {
+      used.add(r.value);
+      chosen.push(cards[r.value].id);
+    }
+    guard++;
+  }
+  return chosen;
+}
+
+/** Resolves an open Discover by adding the chosen card to the player's hand. */
+export function chooseDiscover(state: GameState, playerId: PlayerId, index: number): GameState {
+  if (!state.pendingChoice || state.pendingChoice.player !== playerId) return state;
+  const next = clone(state);
+  const options = next.pendingChoice!.options;
+  const id = options[index] ?? options[0];
+  next.pendingChoice = null;
+  if (id) {
+    const p = next.players[playerId];
+    if (p.hand.length < RULES.maxHandSize) {
+      p.hand.push({ instanceId: mintId(next), defId: id });
+      log(next, `${who(playerId)} discovered ${getCardDef(id).name}.`);
+    } else {
+      log(next, `${who(playerId)}'s hand is full — the discovered card is lost.`);
+    }
+  }
+  return next;
+}
+
+// ---------------------------------------------------------------------------
+// Secrets
+// ---------------------------------------------------------------------------
+
+interface SecretContext {
+  /** The minion that just entered play (onMinionPlayed). */
+  minionId?: string;
+  /** The attacking minion (onHeroAttacked). */
+  attackerId?: string;
+}
+
+/** Fires the owner's Secrets matching `trigger`. Returns true if a spell was negated. */
+function fireSecrets(state: GameState, owner: PlayerId, trigger: SecretTrigger, ctx: SecretContext): boolean {
+  const secrets = state.players[owner].secrets;
+  let negated = false;
+  for (let i = 0; i < secrets.length; ) {
+    const def = getCardDef(secrets[i].defId);
+    if (def.secret && def.secret.trigger === trigger) {
+      secrets.splice(i, 1);
+      log(state, `${who(owner)}'s Secret — ${def.name} — triggers!`);
+      if (resolveSecret(state, owner, def.secret.kind, ctx)) negated = true;
+    } else {
+      i++;
+    }
+  }
+  return negated;
+}
+
+function resolveSecret(state: GameState, owner: PlayerId, kind: SecretKind, ctx: SecretContext): boolean {
+  switch (kind) {
+    case "counterspell":
+      return true; // signal: negate the cast
+    case "iceBarrier":
+      state.players[owner].hero.armor += 8;
+      return false;
+    case "vaporize": {
+      if (ctx.attackerId) {
+        const m = findMinion(state, ctx.attackerId);
+        if (m) m.health = 0;
+      }
+      return false;
+    }
+    case "mirrorEntity": {
+      if (ctx.minionId) {
+        const m = findMinion(state, ctx.minionId);
+        const board = state.players[owner].board;
+        if (m && board.length < RULES.maxBoardSize) board.push(createMinion(state, getCardDef(m.defId)));
+      }
+      return false;
+    }
+    case "repentance": {
+      if (ctx.minionId) {
+        const m = findMinion(state, ctx.minionId);
+        if (m) m.health = Math.min(m.health, 1);
+      }
+      return false;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Combat
 // ---------------------------------------------------------------------------
 
@@ -459,7 +587,7 @@ function maxAttacks(m: Minion): number {
 }
 
 export function canAttack(state: GameState, playerId: PlayerId, attackerId: string): boolean {
-  if (state.phase !== "playing" || state.current !== playerId) return false;
+  if (state.phase !== "playing" || state.current !== playerId || state.pendingChoice) return false;
   const m = state.players[playerId].board.find((x) => x.instanceId === attackerId);
   if (!m) return false;
   if (m.attack <= 0) return false;
@@ -494,8 +622,18 @@ export function attack(
 
   const next = clone(state);
   const attacker = next.players[playerId].board.find((x) => x.instanceId === attackerId)!;
+  // The attack is declared now, so it counts as used even if a Secret stops it.
+  attacker.attacksThisTurn += 1;
 
   if (target.kind === "hero") {
+    // Defender's Secrets react before damage (e.g. Ice Barrier, Vaporize).
+    fireSecrets(next, target.player, "onHeroAttacked", { attackerId: attacker.instanceId });
+    cleanupDeaths(next);
+    const stillAlive = next.players[playerId].board.find((x) => x.instanceId === attackerId);
+    if (!stillAlive || stillAlive.health <= 0) {
+      checkWin(next);
+      return next; // attacker was destroyed/removed by a Secret
+    }
     log(next, `${attacker.name} strikes ${who(target.player)}'s hero for ${attacker.attack}.`);
     const dealt = applyDamage(next, target, attacker.attack);
     applyLifesteal(next, attacker, playerId, dealt);
@@ -514,7 +652,6 @@ export function attack(
     applyPoison(next, defender, { kind: "minion", instanceId: attacker.instanceId }, dealtToAttacker);
   }
 
-  attacker.attacksThisTurn += 1;
   cleanupDeaths(next);
   checkWin(next);
   return next;

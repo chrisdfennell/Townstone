@@ -192,6 +192,15 @@ export function useOnlineGame(config: OnlineConfig): OnlineController {
     setAwaiting(true);
   }, [inputLocked, clearSelection]);
 
+  const chooseDiscoverOption = useCallback(
+    (index: number) => {
+      if (state?.pendingChoice?.player !== "player") return;
+      conn.current?.send({ t: "discover", index });
+      setAwaiting(true);
+    },
+    [state],
+  );
+
   const toggleMulligan = useCallback((instanceId: string) => {
     setMulliganChoices((prev) => (prev.includes(instanceId) ? prev.filter((id) => id !== instanceId) : [...prev, instanceId]));
   }, []);
@@ -220,6 +229,7 @@ export function useOnlineGame(config: OnlineConfig): OnlineController {
     endMyTurn,
     toggleMulligan,
     confirmMulligan,
+    chooseDiscover: chooseDiscoverOption,
     cancelSelection: clearSelection,
   };
 }

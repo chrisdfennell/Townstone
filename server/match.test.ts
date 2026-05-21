@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { Match, sanitizeDeck, type Seat } from "./match";
-import { classDeck, getCardDef } from "../src/engine";
+import { classDeck, createGame, getCardDef } from "../src/engine";
 import type { GameState } from "../src/engine";
+import { viewFor } from "./perspective";
 import type { ServerMessage } from "../src/net/protocol";
 
 function makeSeat(name: string, className: "barbarian" | "sorceress" | "necromancer" | "demonhunter") {
@@ -59,6 +60,31 @@ describe("Match perspective & sync", () => {
     // It is seat A's turn: A sees current="player"; B sees current="ai" (opponent).
     expect(a.lastState()!.current).toBe("player");
     expect(b.lastState()!.current).toBe("ai");
+  });
+
+  it("redacts the opponent's Secrets and Discover options", () => {
+    const g = createGame({
+      seed: 3,
+      first: "player",
+      playerClass: "sorceress",
+      aiClass: "rogue",
+      playerDeck: classDeck("sorceress"),
+      aiDeck: classDeck("rogue"),
+    });
+    // "player" seat is mid-Discover and holds a Secret.
+    g.pendingChoice = { player: "player", options: ["firebolt", "fireball", "frost_nova"] };
+    g.players.player.secrets.push({ instanceId: "s1", defId: "counterspell" });
+
+    // The choosing player sees their own options and Secret identity.
+    const own = viewFor(g, "player");
+    expect(own.pendingChoice?.options.length).toBe(3);
+    expect(own.players.player.secrets[0].defId).toBe("counterspell");
+
+    // The opponent sees neither: options blanked, secret hidden.
+    const foe = viewFor(g, "ai");
+    expect(foe.pendingChoice?.player).toBe("ai"); // the *other* seat is choosing
+    expect(foe.pendingChoice?.options.length).toBe(0);
+    expect(foe.players.ai.secrets[0].defId).toBe("__hidden__");
   });
 
   it("a play by one seat appears on the opponent's board view too", () => {

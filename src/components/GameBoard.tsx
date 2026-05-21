@@ -10,6 +10,7 @@ import { HeroView } from "./HeroView";
 import { MulliganModal } from "./MulliganModal";
 import { HelpButton } from "./HelpButton";
 import { TargetingArrow } from "./TargetingArrow";
+import { DiscoverOverlay } from "./DiscoverOverlay";
 import type { HealthDelta } from "./FloatingNumber";
 
 interface Props {
@@ -83,6 +84,8 @@ export function GameBoard({ ctrl, selfName, enemyName, showMulligan, onExit, onR
           handCount={ai.hand.length}
           targetable={isTargeted(ctrl.highlightedTargets, { kind: "hero", player: "ai" })}
           delta={deltas.get("hero:ai")}
+          secrets={ai.secrets}
+          secretsRevealed={false}
           onClick={() => ctrl.clickHero("ai")}
         />
 
@@ -104,6 +107,8 @@ export function GameBoard({ ctrl, selfName, enemyName, showMulligan, onExit, onR
           handCount={player.hand.length}
           targetable={isTargeted(ctrl.highlightedTargets, { kind: "hero", player: "player" })}
           delta={deltas.get("hero:player")}
+          secrets={player.secrets}
+          secretsRevealed={true}
           canUsePower={ctrl.isMyTurn && canUseHeroPower(state, "player")}
           powerSelected={ctrl.pending?.kind === "power"}
           onUsePower={ctrl.clickHeroPower}
@@ -168,6 +173,18 @@ export function GameBoard({ ctrl, selfName, enemyName, showMulligan, onExit, onR
                 Main Menu
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {state.pendingChoice?.player === "player" && (
+        <DiscoverOverlay options={state.pendingChoice.options} onChoose={ctrl.chooseDiscover} />
+      )}
+      {state.pendingChoice && state.pendingChoice.player !== "player" && (
+        <div className="overlay">
+          <div className="overlay__panel">
+            <h2>Discovering…</h2>
+            <p>{enemyName} is searching for a card.</p>
           </div>
         </div>
       )}

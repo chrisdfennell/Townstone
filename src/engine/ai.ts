@@ -5,6 +5,7 @@ import {
   canAttack,
   canPlayCard,
   canUseHeroPower,
+  chooseDiscover,
   playCard,
   useHeroPower,
   validAttackTargets,
@@ -95,14 +96,34 @@ type Action =
   | { type: "attack"; attackerId: string; target: CharacterRef };
 
 function applyAction(state: GameState, me: PlayerId, action: Action): GameState {
+  let s: GameState;
   switch (action.type) {
     case "play":
-      return playCard(state, me, action.instanceId, action.target ? { target: action.target } : {});
+      s = playCard(state, me, action.instanceId, action.target ? { target: action.target } : {});
+      break;
     case "power":
-      return useHeroPower(state, me, action.target ? { target: action.target } : {});
+      s = useHeroPower(state, me, action.target ? { target: action.target } : {});
+      break;
     case "attack":
-      return attack(state, me, action.attackerId, action.target);
+      s = attack(state, me, action.attackerId, action.target);
+      break;
   }
+  // Resolve any Discover the action opened, picking the highest-cost option.
+  let guard = 0;
+  while (s.pendingChoice && s.pendingChoice.player === me && guard++ < 5) {
+    const options = s.pendingChoice.options;
+    let best = 0;
+    let bestCost = -1;
+    options.forEach((id, i) => {
+      const cost = getCardDef(id).cost;
+      if (cost > bestCost) {
+        bestCost = cost;
+        best = i;
+      }
+    });
+    s = chooseDiscover(s, me, best);
+  }
+  return s;
 }
 
 /**
@@ -111,6 +132,7 @@ function applyAction(state: GameState, me: PlayerId, action: Action): GameState 
  * identical lines.
  */
 function legalActions(state: GameState, me: PlayerId): Action[] {
+  if (state.pendingChoice) return []; // resolved inside applyAction, never lingers
   const actions: Action[] = [];
   const p = state.players[me];
 
@@ -185,6 +207,9 @@ export function evaluateState(state: GameState, me: PlayerId): number {
   // Mild card-advantage term.
   score += state.players[me].hand.length * 1.0;
   score -= state.players[enemy].hand.length * 1.0;
+
+  // Active Secrets are worth something (they pressure the opponent).
+  score += state.players[me].secrets.length * 2.0;
 
   return score;
 }

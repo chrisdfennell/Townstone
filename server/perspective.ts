@@ -21,6 +21,7 @@ export function swapState(state: GameState): GameState {
   s.current = flip(s.current);
   s.first = flip(s.first);
   s.winner = s.winner == null ? null : flip(s.winner);
+  if (s.pendingChoice) s.pendingChoice = { ...s.pendingChoice, player: flip(s.pendingChoice.player) };
   return s;
 }
 
@@ -30,6 +31,11 @@ function redactOpponent(state: GameState): GameState {
   // Keep instance ids (and thus counts) but blank out card identities.
   opp.hand = opp.hand.map((c) => ({ instanceId: c.instanceId, defId: "__hidden__" }));
   opp.deck = opp.deck.map((c) => ({ instanceId: c.instanceId, defId: "__hidden__" }));
+  opp.secrets = opp.secrets.map((c) => ({ instanceId: c.instanceId, defId: "__hidden__" }));
+  // Don't reveal the opponent's Discover options to the viewer.
+  if (state.pendingChoice && state.pendingChoice.player === "ai") {
+    state.pendingChoice = { player: "ai", options: [] };
+  }
   return state;
 }
 
