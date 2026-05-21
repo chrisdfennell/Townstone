@@ -23,6 +23,9 @@ const POWER_GLYPH: Record<string, string> = {
   hp_fireblast: "✦",
   hp_raise: "☠",
   hp_chaosstrike: "◈",
+  hp_envenom: "🗡",
+  hp_reinforce: "✚",
+  hp_markwild: "❀",
 };
 
 export function HeroView({

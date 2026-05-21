@@ -13,7 +13,24 @@ import {
   RULES,
 } from "./engine";
 import { runAiTurn } from "./ai";
+import { classDeck, getCardDef } from "./cards";
+import { PLAYABLE_CLASSES } from "./types";
 import type { GameState, HeroClass, Minion } from "./types";
+
+function craftMinion(over: Partial<Minion> & { instanceId: string; attack: number; health: number }): Minion {
+  return {
+    defId: "fallen_imp",
+    name: "Test",
+    maxHealth: over.health,
+    keywords: [],
+    spellDamage: 0,
+    divineShield: false,
+    frozen: false,
+    summonedThisTurn: false,
+    attacksThisTurn: 0,
+    ...over,
+  };
+}
 
 /** Create a game and skip the mulligan (both players keep their hands). */
 function started(opts: {
@@ -151,6 +168,61 @@ describe("keywords", () => {
     });
     const after = attack(s, "player", "ls1", { kind: "hero", player: "ai" });
     expect(after.players.player.hero.health).toBe(23); // healed 3
+  });
+});
+
+describe("new effects & classes", () => {
+  function withMana(over: (s: GameState) => void): GameState {
+    const s = structuredClone(started({}));
+    s.players.player.mana = 10;
+    over(s);
+    return s;
+  }
+
+  it("Assassinate destroys an enemy minion through Divine Shield", () => {
+    const s = withMana((s) => {
+      s.players.player.hand.push({ instanceId: "as1", defId: "assassinate" });
+      s.players.ai.board.push(craftMinion({ instanceId: "e1", attack: 6, health: 6, divineShield: true }));
+    });
+    const after = playCard(s, "player", "as1", { target: { kind: "minion", instanceId: "e1" } });
+    expect(findMinion(after, "e1")).toBeUndefined();
+  });
+
+  it("Wild Growth permanently raises max mana (ramp)", () => {
+    const s = withMana((s) => {
+      s.players.player.maxMana = 5;
+      s.players.player.hand.push({ instanceId: "wg1", defId: "wild_growth" });
+    });
+    const after = playCard(s, "player", "wg1");
+    expect(after.players.player.maxMana).toBe(6);
+  });
+
+  it("Hand of Light grants Divine Shield to a friendly minion", () => {
+    const s = withMana((s) => {
+      s.players.player.board.push(craftMinion({ instanceId: "m1", attack: 3, health: 3 }));
+      s.players.player.hand.push({ instanceId: "hl1", defId: "hand_of_light" });
+    });
+    const after = playCard(s, "player", "hl1", { target: { kind: "minion", instanceId: "m1" } });
+    const m = findMinion(after, "m1")!;
+    expect(m.divineShield).toBe(true);
+    expect(m.keywords).toContain("divineShield");
+  });
+});
+
+describe("class decks", () => {
+  it("every playable class builds a legal 30-card deck", () => {
+    for (const cls of PLAYABLE_CLASSES) {
+      const deck = classDeck(cls);
+      expect(deck.length).toBe(30);
+      const counts = new Map<string, number>();
+      for (const id of deck) {
+        const def = getCardDef(id);
+        expect(def.uncollectible ?? false).toBe(false);
+        expect(def.className === "neutral" || def.className === cls).toBe(true);
+        counts.set(id, (counts.get(id) ?? 0) + 1);
+      }
+      for (const [id, n] of counts) expect(n).toBeLessThanOrEqual(getCardDef(id).legendary ? 1 : 2);
+    }
   });
 });
 

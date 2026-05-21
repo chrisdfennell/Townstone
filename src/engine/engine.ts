@@ -344,6 +344,9 @@ function resolveEffect(state: GameState, effect: Effect, controller: PlayerId, c
     case "mana":
       state.players[controller].mana += effect.amount;
       break;
+    case "manaCrystal":
+      state.players[controller].maxMana = Math.min(RULES.maxMana, state.players[controller].maxMana + effect.amount);
+      break;
     case "summon": {
       const def = getCardDef(effect.cardId);
       const board = state.players[controller].board;
@@ -377,6 +380,24 @@ function resolveEffect(state: GameState, effect: Effect, controller: PlayerId, c
         if (ref.kind !== "minion") continue;
         const m = findMinion(state, ref.instanceId);
         if (m) m.frozen = true;
+      }
+      break;
+    }
+    case "addKeyword": {
+      for (const ref of resolveSelector(state, effect.selector, controller, ctx.target)) {
+        if (ref.kind !== "minion") continue;
+        const m = findMinion(state, ref.instanceId);
+        if (!m) continue;
+        if (!m.keywords.includes(effect.keyword)) m.keywords.push(effect.keyword);
+        if (effect.keyword === "divineShield") m.divineShield = true;
+      }
+      break;
+    }
+    case "destroy": {
+      for (const ref of resolveSelector(state, effect.selector, controller, ctx.target)) {
+        if (ref.kind !== "minion") continue;
+        const m = findMinion(state, ref.instanceId);
+        if (m) m.health = 0; // bypasses Divine Shield, like Hearthstone "destroy"
       }
       break;
     }

@@ -91,7 +91,8 @@ game is fully reproducible from `seed + action list`.
 ## Roadmap
 
 - [x] More cards + keywords (Lifesteal, Poisonous, Windfury, Freeze, Spell Damage)
-- [x] Hero powers + Diablo class identities (Barbarian, Sorceress, Necromancer, Demon Hunter)
+- [x] Hero powers + Diablo class identities — 7 classes (Barbarian, Sorceress,
+      Necromancer, Demon Hunter, Rogue, Paladin, Druid)
 - [x] Mulligan / opening-hand selection + "The Coin"
 - [x] Deckbuilder and collection (per-class, saved to localStorage)
 - [x] Juice: floating damage numbers, minion-summon + freeze animations

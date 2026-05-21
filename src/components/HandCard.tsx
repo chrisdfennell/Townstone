@@ -14,6 +14,9 @@ const CLASS_GLYPH: Record<string, string> = {
   sorceress: "✦",
   necromancer: "☠",
   demonhunter: "◈",
+  rogue: "🗡",
+  paladin: "✚",
+  druid: "❀",
   neutral: "◆",
 };
 

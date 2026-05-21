@@ -16,14 +16,20 @@ export type HeroClass =
   | "sorceress"
   | "necromancer"
   | "demonhunter"
+  | "rogue"
+  | "paladin"
+  | "druid"
   | "neutral";
 
-/** The five playable classes (everything except the neutral pool). */
+/** The playable classes (everything except the neutral pool). */
 export const PLAYABLE_CLASSES: Exclude<HeroClass, "neutral">[] = [
   "barbarian",
   "sorceress",
   "necromancer",
   "demonhunter",
+  "rogue",
+  "paladin",
+  "druid",
 ];
 
 /** Intrinsic keywords printed on a card. */
@@ -64,7 +70,13 @@ export type Effect =
   | { kind: "buff"; selector: TargetSelector; attack: number; health: number }
   | { kind: "armor"; selector: TargetSelector; amount: number }
   | { kind: "mana"; amount: number }
+  /** Permanently gain mana crystals (ramp), capped at the max. */
+  | { kind: "manaCrystal"; amount: number }
   | { kind: "freeze"; selector: TargetSelector }
+  /** Grant a keyword to the target minion(s). */
+  | { kind: "addKeyword"; selector: TargetSelector; keyword: Keyword }
+  /** Destroy the target minion(s) outright (ignores Divine Shield). */
+  | { kind: "destroy"; selector: TargetSelector }
   | { kind: "draw"; amount: number }
   | { kind: "summon"; cardId: string; count: number };
 

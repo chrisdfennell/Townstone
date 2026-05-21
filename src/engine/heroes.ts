@@ -37,6 +37,34 @@ export const HERO_POWERS: Record<HeroClass, HeroPower> = {
     requiresTarget: true,
     targetFilter: "friendlyMinion",
   },
+  rogue: {
+    id: "hp_envenom",
+    name: "Envenom",
+    cost: 2,
+    text: "Give a friendly minion Poisonous.",
+    effects: [{ kind: "addKeyword", selector: "chosen", keyword: "poisonous" }],
+    requiresTarget: true,
+    targetFilter: "friendlyMinion",
+  },
+  paladin: {
+    id: "hp_reinforce",
+    name: "Reinforce",
+    cost: 2,
+    text: "Summon a 1/1 Silver Hand Recruit.",
+    effects: [{ kind: "summon", cardId: "silver_hand_recruit", count: 1 }],
+  },
+  druid: {
+    id: "hp_markwild",
+    name: "Mark of the Wild",
+    cost: 2,
+    text: "Give a friendly minion +1/+1 and Taunt.",
+    effects: [
+      { kind: "buff", selector: "chosen", attack: 1, health: 1 },
+      { kind: "addKeyword", selector: "chosen", keyword: "taunt" },
+    ],
+    requiresTarget: true,
+    targetFilter: "friendlyMinion",
+  },
   // Neutral has no class identity; falls back to the Sorceress power if ever
   // used (e.g. a neutral "practice" hero).
   neutral: {
@@ -55,6 +83,9 @@ export const CLASS_LABEL: Record<HeroClass, string> = {
   sorceress: "Sorceress",
   necromancer: "Necromancer",
   demonhunter: "Demon Hunter",
+  rogue: "Rogue",
+  paladin: "Paladin",
+  druid: "Druid",
   neutral: "Wanderer",
 };
 
