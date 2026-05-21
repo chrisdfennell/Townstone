@@ -18,6 +18,11 @@ concurrency:
   group: pages
   cancel-in-progress: false
 
+# Run JS-based actions on Node 24 (some, like the Pages artifact action, still
+# bundle Node 20 which the runner is deprecating). Safe forward-compatible opt-in.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   build:
     runs-on: ubuntu-latest
