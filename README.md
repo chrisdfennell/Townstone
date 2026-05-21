@@ -60,8 +60,8 @@ game is fully reproducible from `seed + action list`.
 - [x] Mulligan / opening-hand selection + "The Coin"
 - [x] Deckbuilder and collection (per-class, saved to localStorage)
 - [x] Juice: floating damage numbers, minion-summon + freeze animations
+- [x] Smarter AI — board-evaluation heuristic + beam search over whole-turn lines
 - [ ] Deathrattle chains, more legendaries, secrets
-- [ ] Smarter AI (lookahead / scoring of full turns)
 - [ ] Sound + richer art
 - [ ] **Multiplayer**: move the engine behind an authoritative Node + WebSocket
       server. Because the engine is already pure and serializable, the same

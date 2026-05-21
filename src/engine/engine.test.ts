@@ -13,7 +13,7 @@ import {
   RULES,
 } from "./engine";
 import { runAiTurn } from "./ai";
-import type { GameState, HeroClass } from "./types";
+import type { GameState, HeroClass, Minion } from "./types";
 
 /** Create a game and skip the mulligan (both players keep their hands). */
 function started(opts: {
@@ -162,5 +162,61 @@ describe("full AI turn", () => {
     const frames = runAiTurn(g);
     const final = frames.length ? frames[frames.length - 1] : g;
     expect(final.phase === "playing" || final.phase === "gameOver").toBe(true);
+  });
+});
+
+describe("smarter AI (search)", () => {
+  function aiTurnState(): GameState {
+    // Hand the AI its turn with a clean board to construct scenarios on.
+    let g = started({});
+    g = endTurn(g, "player");
+    g = structuredClone(g);
+    g.players.ai.board = [];
+    g.players.player.board = [];
+    return g;
+  }
+
+  function addMinion(s: GameState, owner: "player" | "ai", m: Partial<Minion> & { attack: number; health: number }): string {
+    const id = `t_${owner}_${s.players[owner].board.length}`;
+    s.players[owner].board.push({
+      instanceId: id,
+      defId: m.defId ?? "fallen_imp",
+      name: m.name ?? "Test Minion",
+      attack: m.attack,
+      health: m.health,
+      maxHealth: m.maxHealth ?? m.health,
+      keywords: m.keywords ?? [],
+      spellDamage: m.spellDamage ?? 0,
+      divineShield: m.divineShield ?? false,
+      frozen: false,
+      summonedThisTurn: false,
+      attacksThisTurn: 0,
+    });
+    return id;
+  }
+
+  it("finds lethal across multiple attackers", () => {
+    const s = aiTurnState();
+    s.players.player.hero.health = 6;
+    s.players.player.hero.armor = 0;
+    addMinion(s, "ai", { attack: 4, health: 4 });
+    addMinion(s, "ai", { attack: 3, health: 3 });
+    const frames = runAiTurn(s);
+    const final = frames[frames.length - 1];
+    expect(final.phase).toBe("gameOver");
+    expect(final.winner).toBe("ai");
+  });
+
+  it("takes a favorable trade instead of going face", () => {
+    const s = aiTurnState();
+    s.players.player.hero.health = 30;
+    // AI 3/4 can kill the enemy 3/2 and survive — clearly better than face.
+    const attacker = addMinion(s, "ai", { attack: 3, health: 4 });
+    const victim = addMinion(s, "player", { attack: 3, health: 2 });
+    const frames = runAiTurn(s);
+    const final = frames[frames.length - 1];
+    // The enemy minion should be dead, and our attacker should have survived.
+    expect(final.players.player.board.find((m) => m.instanceId === victim)).toBeUndefined();
+    expect(final.players.ai.board.find((m) => m.instanceId === attacker)).toBeDefined();
   });
 });

@@ -1,11 +1,10 @@
-import type { CardDef, CharacterRef, Effect, GameState, HeroPower, Minion, PlayerId } from "./types";
+import type { CharacterRef, GameState, Minion, PlayerId } from "./types";
 import { getCardDef } from "./cards";
 import {
   attack,
   canAttack,
   canPlayCard,
   canUseHeroPower,
-  findMinion,
   playCard,
   useHeroPower,
   validAttackTargets,
@@ -13,189 +12,174 @@ import {
 } from "./engine";
 
 /**
- * A simple greedy "tempo" AI.
+ * Townstone AI.
  *
- * Strategy: spend as much mana as possible each turn on the highest-impact
- * plays (including its Hero Power), then attack — taking favorable trades when
- * available and otherwise pushing damage at the enemy hero. Deliberately
- * beatable but not silly.
+ * Rather than a fixed greedy script, the AI *searches*: it evaluates board
+ * states with a heuristic and runs a beam search over sequences of legal
+ * actions for its turn, simulating each via the pure engine. This lets it find
+ * multi-step lines the old greedy AI missed — buff-then-attack, setting up
+ * favorable trades, and lethal across several attackers.
  *
- * Returns intermediate states ("frames") so the UI can replay the AI's turn
- * one action at a time. The caller ends the turn after the frames are shown.
+ * Returns intermediate states ("frames") for the best line so the UI can replay
+ * the turn one action at a time. The caller ends the turn afterward.
  */
+const BEAM_WIDTH = 8;
+const MAX_DEPTH = 18;
+/** Hard cap on simulated actions per turn, to keep planning snappy. */
+const EXPANSION_BUDGET = 6000;
+
+const WIN_SCORE = 1_000_000;
+
 export function runAiTurn(start: GameState): GameState[] {
-  const frames: GameState[] = [];
-  let state = start;
+  const me: PlayerId = "ai";
 
-  // --- Play phase: best affordable play, including the Hero Power. ---
-  for (let guard = 0; guard < 40; guard++) {
-    const next = makeBestPlay(state);
-    if (!next || next === state) break;
-    state = next;
-    frames.push(state);
-    if (state.phase === "gameOver") return frames;
-  }
+  let beam: Node[] = [{ state: start, path: [], score: evaluateState(start, me) }];
+  let best: Node = beam[0];
+  let budget = EXPANSION_BUDGET;
 
-  // --- Attack phase: resolve one attack at a time. ---
-  for (let guard = 0; guard < 40; guard++) {
-    const move = bestAttack(state);
-    if (!move) break;
-    const next = attack(state, "ai", move.attackerId, move.target);
-    if (next === state) break;
-    state = next;
-    frames.push(state);
-    if (state.phase === "gameOver") return frames;
-  }
-
-  return frames;
-}
-
-/** Picks the best card-or-hero-power play and executes it, or returns null. */
-function makeBestPlay(state: GameState): GameState | null {
-  const ai = state.players.ai;
-
-  const cardOptions = ai.hand
-    .filter((c) => canPlayCard(state, "ai", c.instanceId))
-    .map((c) => ({ card: c, def: getCardDef(c.defId) }))
-    .filter(({ def }) => isWorthPlaying(state, def.onPlay, def.requiresTarget, def.targetFilter));
-
-  // Best card by tempo (most mana spent), tie-break toward minions.
-  cardOptions.sort((a, b) => {
-    if (b.def.cost !== a.def.cost) return b.def.cost - a.def.cost;
-    return (b.def.type === "minion" ? 1 : 0) - (a.def.type === "minion" ? 1 : 0);
-  });
-  const bestCard = cardOptions[0];
-
-  // Consider the Hero Power if nothing better to do with the mana.
-  const power = ai.hero.power;
-  const canPower = canUseHeroPower(state, "ai") && isWorthPlaying(state, power.effects, power.requiresTarget, power.targetFilter);
-
-  // Prefer playing cards; use the power when no card is affordable or the power
-  // is clearly strong (cheap and impactful) and we'd otherwise waste mana.
-  if (bestCard) {
-    const target = bestCard.def.requiresTarget
-      ? chooseTarget(state, bestCard.def.onPlay, bestCard.def.targetFilter) ?? undefined
-      : undefined;
-    return playCard(state, "ai", bestCard.card.instanceId, target ? { target } : {});
-  }
-  if (canPower) {
-    const target = power.requiresTarget ? chooseTargetForPower(state, power) ?? undefined : undefined;
-    if (power.requiresTarget && !target) return null;
-    return useHeroPower(state, "ai", target ? { target } : {});
-  }
-  return null;
-}
-
-/** Avoid playing reactive effects that would be wasted (e.g. heal at full HP). */
-function isWorthPlaying(
-  state: GameState,
-  effects: Effect[] | undefined,
-  requiresTarget: boolean | undefined,
-  filter: CardDef["targetFilter"],
-): boolean {
-  if (!requiresTarget) return true;
-  if (effects?.some((e) => e.kind === "heal" || e.kind === "buff")) {
-    return chooseTarget(state, effects, filter) != null;
-  }
-  return validTargets(state, "ai", filter).length > 0;
-}
-
-function chooseTargetForPower(state: GameState, power: HeroPower): CharacterRef | null {
-  return chooseTarget(state, power.effects, power.targetFilter);
-}
-
-function chooseTarget(
-  state: GameState,
-  effects: Effect[] | undefined,
-  filter: CardDef["targetFilter"],
-): CharacterRef | null {
-  const targets = validTargets(state, "ai", filter);
-  if (targets.length === 0) return null;
-
-  const damage = effects?.find((e) => e.kind === "damage");
-  if (damage && damage.kind === "damage") {
-    const enemyMinions = state.players.player.board;
-    const killable = enemyMinions
-      .filter((m) => m.health <= damage.amount && !m.divineShield)
-      .sort((a, b) => b.attack - a.attack)[0];
-    if (killable) return { kind: "minion", instanceId: killable.instanceId };
-    // If the spell can hit face, push damage; otherwise hit the biggest threat.
-    const faceOk = targets.some((t) => t.kind === "hero" && t.player === "player");
-    if (faceOk) return { kind: "hero", player: "player" };
-    const biggest = [...enemyMinions].sort((a, b) => b.attack - a.attack)[0];
-    return biggest ? { kind: "minion", instanceId: biggest.instanceId } : targets[0];
-  }
-
-  const heal = effects?.find((e) => e.kind === "heal");
-  if (heal && heal.kind === "heal") {
-    const candidates: Array<{ ref: CharacterRef; missing: number }> = [];
-    const aiHero = state.players.ai.hero;
-    if (aiHero.health < aiHero.maxHealth) {
-      candidates.push({ ref: { kind: "hero", player: "ai" }, missing: aiHero.maxHealth - aiHero.health });
-    }
-    for (const m of state.players.ai.board) {
-      if (m.health < m.maxHealth) {
-        candidates.push({ ref: { kind: "minion", instanceId: m.instanceId }, missing: m.maxHealth - m.health });
+  for (let depth = 0; depth < MAX_DEPTH && budget > 0; depth++) {
+    const children: Node[] = [];
+    for (const node of beam) {
+      if (node.state.phase !== "playing") continue;
+      for (const action of legalActions(node.state, me)) {
+        if (budget-- <= 0) break;
+        const ns = applyAction(node.state, me, action);
+        if (ns === node.state) continue; // illegal / no-op
+        const child: Node = { state: ns, path: [...node.path, ns], score: evaluateState(ns, me) };
+        children.push(child);
+        if (child.score > best.score) best = child;
       }
+      if (budget <= 0) break;
     }
-    candidates.sort((a, b) => b.missing - a.missing);
-    return candidates[0]?.ref ?? null;
+    if (children.length === 0) break;
+    children.sort((a, b) => b.score - a.score);
+    beam = children.slice(0, BEAM_WIDTH);
   }
 
-  const buff = effects?.find((e) => e.kind === "buff");
-  if (buff) {
-    // Buff our strongest friendly minion (it'll attack hardest).
-    const best = [...state.players.ai.board].sort((a, b) => b.attack + b.health - (a.attack + a.health))[0];
-    return best ? { kind: "minion", instanceId: best.instanceId } : null;
-  }
-
-  return targets[0];
+  return best.path;
 }
 
-interface AttackMove {
-  attackerId: string;
-  target: CharacterRef;
+interface Node {
+  state: GameState;
+  path: GameState[];
+  score: number;
 }
 
-function bestAttack(state: GameState): AttackMove | null {
-  const ai = state.players.ai;
-  const ready = ai.board.filter((m) => canAttack(state, "ai", m.instanceId));
-  if (ready.length === 0) return null;
+type Action =
+  | { type: "play"; instanceId: string; target?: CharacterRef }
+  | { type: "power"; target?: CharacterRef }
+  | { type: "attack"; attackerId: string; target: CharacterRef };
 
-  ready.sort((a, b) => b.attack - a.attack);
-  const attacker = ready[0];
-  const legal = validAttackTargets(state, "ai");
-  const minionTargets = legal.filter((t) => t.kind === "minion");
-  const heroTarget = legal.find((t) => t.kind === "hero");
-
-  // Lethal: swing face if it kills.
-  if (heroTarget && heroTarget.kind === "hero" && state.players.player.hero.health <= attacker.attack) {
-    return { attackerId: attacker.instanceId, target: heroTarget };
+function applyAction(state: GameState, me: PlayerId, action: Action): GameState {
+  switch (action.type) {
+    case "play":
+      return playCard(state, me, action.instanceId, action.target ? { target: action.target } : {});
+    case "power":
+      return useHeroPower(state, me, action.target ? { target: action.target } : {});
+    case "attack":
+      return attack(state, me, action.attackerId, action.target);
   }
-
-  let best: { target: CharacterRef; score: number } | null = null;
-  for (const t of minionTargets) {
-    if (t.kind !== "minion") continue;
-    const enemy = findMinion(state, t.instanceId);
-    if (!enemy) continue;
-    const kills = attacker.keywords.includes("poisonous")
-      ? !enemy.divineShield
-      : !enemy.divineShield && attacker.attack >= enemy.health;
-    const survives = attacker.health > enemy.attack;
-    let score = 0;
-    if (kills && survives) score = 100 + enemy.attack + enemy.health;
-    else if (kills) score = 40 + enemy.attack;
-    else score = enemy.attack;
-    if (!best || score > best.score) best = { target: t, score };
-  }
-
-  const taunted = minionTargets.length > 0 && !heroTarget;
-  if (taunted && best) return { attackerId: attacker.instanceId, target: best.target };
-  if (best && best.score >= 100) return { attackerId: attacker.instanceId, target: best.target };
-  if (heroTarget) return { attackerId: attacker.instanceId, target: heroTarget };
-  if (best) return { attackerId: attacker.instanceId, target: best.target };
-  return null;
 }
+
+/**
+ * Enumerates the legal actions from a state. Duplicate cards (same definition +
+ * same target) are collapsed to one action so the beam isn't wasted exploring
+ * identical lines.
+ */
+function legalActions(state: GameState, me: PlayerId): Action[] {
+  const actions: Action[] = [];
+  const p = state.players[me];
+
+  const seenPlays = new Set<string>();
+  for (const card of p.hand) {
+    if (!canPlayCard(state, me, card.instanceId)) continue;
+    const def = getCardDef(card.defId);
+    if (def.requiresTarget) {
+      for (const t of validTargets(state, me, def.targetFilter)) {
+        const key = `${def.id}|${refKey(t)}`;
+        if (seenPlays.has(key)) continue;
+        seenPlays.add(key);
+        actions.push({ type: "play", instanceId: card.instanceId, target: t });
+      }
+    } else {
+      if (seenPlays.has(def.id)) continue;
+      seenPlays.add(def.id);
+      actions.push({ type: "play", instanceId: card.instanceId });
+    }
+  }
+
+  if (canUseHeroPower(state, me)) {
+    const power = p.hero.power;
+    if (power.requiresTarget) {
+      for (const t of validTargets(state, me, power.targetFilter)) {
+        actions.push({ type: "power", target: t });
+      }
+    } else {
+      actions.push({ type: "power" });
+    }
+  }
+
+  const defenders = validAttackTargets(state, me);
+  for (const m of p.board) {
+    if (!canAttack(state, me, m.instanceId)) continue;
+    for (const t of defenders) actions.push({ type: "attack", attackerId: m.instanceId, target: t });
+  }
+
+  return actions;
+}
+
+function refKey(ref: CharacterRef): string {
+  return ref.kind === "hero" ? `hero:${ref.player}` : `minion:${ref.instanceId}`;
+}
+
+// ---------------------------------------------------------------------------
+// Heuristic board evaluation
+// ---------------------------------------------------------------------------
+
+/** Higher is better for `me`. Used to rank candidate end-of-line states. */
+export function evaluateState(state: GameState, me: PlayerId): number {
+  const enemy: PlayerId = me === "player" ? "ai" : "player";
+  if (state.phase === "gameOver") {
+    if (state.winner === me) return WIN_SCORE;
+    if (state.winner === enemy) return -WIN_SCORE;
+    return 0;
+  }
+
+  const myHero = state.players[me].hero;
+  const enemyHero = state.players[enemy].hero;
+
+  let score = 0;
+  // Effective hero health (health + armor). Pushing the enemy down matters more
+  // as they get low, so weight the enemy's missing health a touch extra.
+  score += (myHero.health + myHero.armor) * 1.0;
+  score -= (enemyHero.health + enemyHero.armor) * 1.3;
+
+  // Board presence dominates tempo decisions.
+  for (const m of state.players[me].board) score += minionValue(m) * 2.0;
+  for (const m of state.players[enemy].board) score -= minionValue(m) * 2.0;
+
+  // Mild card-advantage term.
+  score += state.players[me].hand.length * 1.0;
+  score -= state.players[enemy].hand.length * 1.0;
+
+  return score;
+}
+
+function minionValue(m: Minion): number {
+  let v = m.attack + m.health;
+  if (m.keywords.includes("taunt")) v += 1.5;
+  if (m.keywords.includes("divineShield")) v += 2;
+  if (m.keywords.includes("lifesteal")) v += m.attack * 0.5;
+  if (m.keywords.includes("windfury")) v += m.attack * 0.7;
+  if (m.keywords.includes("poisonous")) v += 2;
+  v += m.spellDamage * 1.5;
+  if (m.frozen) v -= 1; // can't attack next turn
+  return v;
+}
+
+// ---------------------------------------------------------------------------
+// Mulligan
+// ---------------------------------------------------------------------------
 
 /** Cards to throw back during the opening mulligan: keep the cheap curve. */
 export function chooseMulligan(state: GameState, playerId: PlayerId): string[] {

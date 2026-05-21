@@ -19,6 +19,10 @@ single-player vs AI now, multiplayer later.
 - Cards are data-driven via the `Effect[]` system in `types.ts`/`cards.ts`. Add
   new mechanics as new `Effect` kinds + handling in `resolveEffect`, not ad-hoc.
 - UI talks to the engine only through `src/game/useGame.ts`.
+- The AI (`ai.ts`) is search-based: `evaluateState` scores a board and `runAiTurn`
+  runs a beam search (width/depth/budget constants at the top) over legal action
+  sequences, simulating with the pure engine. To tune AI strength, adjust
+  `evaluateState` weights or the beam constants — keep `runAiTurn` returning frames.
 
 ## Conventions
 - Keep new cards in `cards.ts`; reference by `id`. Add to `starterDeck()` to make
