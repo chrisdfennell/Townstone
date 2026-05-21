@@ -133,6 +133,8 @@ export interface CardDef {
   legendary?: boolean;
   /** Cards (like The Coin) that should never appear in the deckbuilder. */
   uncollectible?: boolean;
+  /** Campaign reward: usable only after it's unlocked; never in random pools. */
+  reward?: boolean;
 
   // Minion stats
   attack?: number;

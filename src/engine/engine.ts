@@ -69,6 +69,9 @@ export interface NewGameOptions {
   aiDeck: string[];
   playerClass?: PlayerState["hero"]["className"];
   aiClass?: PlayerState["hero"]["className"];
+  /** Optional Hero Power overrides (used by campaign bosses). */
+  playerPower?: HeroPower;
+  aiPower?: HeroPower;
 }
 
 /** Creates a game in the mulligan phase. Call `beginPlay` once both sides have
@@ -90,6 +93,9 @@ export function createGame(opts: NewGameOptions): GameState {
     nextInstanceId: 1,
     rngState: opts.seed ?? Math.floor(Math.random() * 2 ** 31),
   };
+
+  if (opts.playerPower) state.players.player.hero.power = opts.playerPower;
+  if (opts.aiPower) state.players.ai.hero.power = opts.aiPower;
 
   loadDeck(state, "player", opts.playerDeck);
   loadDeck(state, "ai", opts.aiDeck);

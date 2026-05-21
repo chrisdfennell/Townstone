@@ -97,10 +97,13 @@ game is fully reproducible from `seed + action list`.
 - [x] Deckbuilder and collection (per-class, saved to localStorage)
 - [x] Juice: floating damage numbers, minion-summon + freeze animations
 - [x] Secrets (trigger on the opponent's turn) and Discover (choose 1 of 3)
+- [x] Secret-aware AI — plans blind to your Secrets and baits them with cheap actions
+- [x] Deathrattle chains + legendaries
+- [x] Diablo boss **Campaign** — a 5-boss gauntlet (themed decks + unique Hero
+      Powers) that unlocks reward legendaries into your collection
 - [x] Smarter AI — board-evaluation heuristic + beam search over whole-turn lines
 - [x] **Multiplayer** — authoritative Node + WebSocket server reusing the pure
       engine, with per-seat perspective + hidden-info redaction and matchmaking
 - [ ] Multiplayer polish: reconnect, ranked matchmaking, hosting the server
-- [ ] Deathrattle chains, more legendaries, secrets
-- [ ] Sound + richer art
+- [ ] More campaign bosses, secrets/discover variety, sound + richer art
 ```

@@ -48,17 +48,29 @@ export const DIFFICULTY_PROFILES: Record<AiDifficulty, SearchProfile> = {
 
 export function runAiTurn(start: GameState, difficulty: AiDifficulty = "normal"): GameState[] {
   const me: PlayerId = "ai";
+  const enemy: PlayerId = "player";
   const profile = DIFFICULTY_PROFILES[difficulty] ?? DIFFICULTY_PROFILES.normal;
+  const enemySecrets = start.players[enemy].secrets.length;
 
-  // A win is always taken regardless of noise; noise only perturbs ordinary
-  // positional judgment.
+  // Secret-aware play: the AI knows the *count* of the opponent's Secrets but
+  // not which they are, so it plans on a state with those Secrets removed
+  // (no omniscient dodging), then baits them with cheap actions first.
+  const planStart = enemySecrets > 0 ? blindEnemySecrets(start, enemy) : start;
+  const plan = planActions(planStart, me, profile);
+  const ordered = enemySecrets > 0 ? baitOrder(plan, planStart, me) : plan;
+
+  return executePlan(start, me, ordered);
+}
+
+/** Beam search; returns the action sequence of the best line found. */
+function planActions(start: GameState, me: PlayerId, profile: SearchProfile): Action[] {
   const scoreFor = (s: GameState): number => {
     const base = evaluateState(s, me);
     if (Math.abs(base) >= WIN_SCORE) return base;
     return base + (profile.noise > 0 ? (Math.random() * 2 - 1) * profile.noise : 0);
   };
 
-  let beam: Node[] = [{ state: start, path: [], score: scoreFor(start) }];
+  let beam: Node[] = [{ state: start, actions: [], score: scoreFor(start) }];
   let best: Node = beam[0];
   let budget = profile.budget;
 
@@ -70,7 +82,7 @@ export function runAiTurn(start: GameState, difficulty: AiDifficulty = "normal")
         if (budget-- <= 0) break;
         const ns = applyAction(node.state, me, action);
         if (ns === node.state) continue; // illegal / no-op
-        const child: Node = { state: ns, path: [...node.path, ns], score: scoreFor(ns) };
+        const child: Node = { state: ns, actions: [...node.actions, action], score: scoreFor(ns) };
         children.push(child);
         if (child.score > best.score) best = child;
       }
@@ -81,12 +93,69 @@ export function runAiTurn(start: GameState, difficulty: AiDifficulty = "normal")
     beam = children.slice(0, profile.beamWidth);
   }
 
-  return best.path;
+  return best.actions;
+}
+
+/** Runs the planned actions against the real state, collecting animation frames.
+ *  Skips actions that became illegal (e.g. a Secret disrupted the board) and
+ *  greedily mops up any attacks the disruption left available. */
+function executePlan(start: GameState, me: PlayerId, actions: Action[]): GameState[] {
+  const frames: GameState[] = [];
+  let s = start;
+  for (const action of actions) {
+    if (s.phase !== "playing") return frames;
+    const ns = applyAction(s, me, action);
+    if (ns === s) continue; // no longer legal — skip
+    s = ns;
+    frames.push(s);
+    if (s.phase === "gameOver") return frames;
+  }
+  // Greedy finish: the plan may have been thrown off by a Secret; take any
+  // clearly-good attack still available (also catches freshly-enabled lethal).
+  for (let guard = 0; guard < 20 && s.phase === "playing"; guard++) {
+    const mv = greedyAttack(s, me);
+    if (!mv) break;
+    const ns = attack(s, me, mv.attackerId, mv.target);
+    if (ns === s) break;
+    s = ns;
+    frames.push(s);
+  }
+  return frames;
+}
+
+/** Returns a copy of `state` with `enemy`'s Secrets hidden from the planner. */
+function blindEnemySecrets(state: GameState, enemy: PlayerId): GameState {
+  const s = structuredClone(state);
+  s.players[enemy].secrets = [];
+  return s;
+}
+
+/** Reorders a plan to bait Secrets: cheap plays and small attacks go first. */
+function baitOrder(actions: Action[], state: GameState, me: PlayerId): Action[] {
+  const cost = (a: Action) =>
+    a.type === "play" ? cardCost(state, me, a.instanceId) : a.type === "power" ? 2 : 0;
+  const atkPower = (a: Action) =>
+    a.type === "attack" ? state.players[me].board.find((m) => m.instanceId === a.attackerId)?.attack ?? 0 : 0;
+
+  const plays = actions.filter((a) => a.type === "play").sort((x, y) => cost(x) - cost(y));
+  const powers = actions.filter((a) => a.type === "power");
+  // Attacks on the hero ordered weakest-first (cheap traps trigger on the small one).
+  const heroAttacks = actions
+    .filter((a) => a.type === "attack" && a.target.kind === "hero")
+    .sort((x, y) => atkPower(x) - atkPower(y));
+  const minionAttacks = actions.filter((a) => a.type === "attack" && a.target.kind === "minion");
+
+  return [...plays, ...powers, ...minionAttacks, ...heroAttacks];
+}
+
+function cardCost(state: GameState, me: PlayerId, instanceId: string): number {
+  const card = state.players[me].hand.find((c) => c.instanceId === instanceId);
+  return card ? getCardDef(card.defId).cost : 0;
 }
 
 interface Node {
   state: GameState;
-  path: GameState[];
+  actions: Action[];
   score: number;
 }
 
@@ -224,6 +293,23 @@ function minionValue(m: Minion): number {
   v += m.spellDamage * 1.5;
   if (m.frozen) v -= 1; // can't attack next turn
   return v;
+}
+
+/** Best single improving attack from here, by one-ply evaluation, or null. */
+function greedyAttack(state: GameState, me: PlayerId): { attackerId: string; target: CharacterRef } | null {
+  let best: { attackerId: string; target: CharacterRef } | null = null;
+  let bestScore = evaluateState(state, me);
+  for (const action of legalActions(state, me)) {
+    if (action.type !== "attack") continue;
+    const ns = attack(state, me, action.attackerId, action.target);
+    if (ns === state) continue;
+    const score = evaluateState(ns, me);
+    if (score > bestScore) {
+      bestScore = score;
+      best = { attackerId: action.attackerId, target: action.target };
+    }
+  }
+  return best;
 }
 
 // ---------------------------------------------------------------------------

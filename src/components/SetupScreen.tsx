@@ -6,9 +6,12 @@ import {
   cardsForClass,
   classDeck,
   getCardDef,
+  rewardCards,
 } from "../engine";
-import type { AiDifficulty, HeroClass } from "../engine";
+import type { AiDifficulty, CardDef, HeroClass } from "../engine";
 import { DECK_SIZE, copyLimit, loadDeck, saveDeck } from "../game/deckStore";
+import { isCardUnlocked } from "../game/collection";
+import { REWARD_SOURCE } from "../game/campaign";
 import { HelpButton } from "./HelpButton";
 import { onlineReachable } from "../net/connection";
 import type { GameConfig } from "../game/useGame";
@@ -17,6 +20,7 @@ import type { OnlineConfig } from "../game/useOnlineGame";
 interface Props {
   onStartLocal: (config: GameConfig) => void;
   onStartOnline: (config: OnlineConfig) => void;
+  onCampaign: () => void;
 }
 
 const DIFFICULTIES: Array<{ id: AiDifficulty; label: string; blurb: string }> = [
@@ -25,7 +29,7 @@ const DIFFICULTIES: Array<{ id: AiDifficulty; label: string; blurb: string }> = 
   { id: "nightmare", label: "Nightmare", blurb: "Deep search, near-optimal." },
 ];
 
-export function SetupScreen({ onStartLocal, onStartOnline }: Props) {
+export function SetupScreen({ onStartLocal, onStartOnline, onCampaign }: Props) {
   const [mode, setMode] = useState<"ai" | "online">("ai");
   const [name, setName] = useState("Challenger");
   const [cls, setCls] = useState<HeroClass>("barbarian");
@@ -42,7 +46,20 @@ export function SetupScreen({ onStartLocal, onStartOnline }: Props) {
     if (deck.length === DECK_SIZE) saveDeck(cls, deck);
   }, [cls, deck]);
 
-  const pool = useMemo(() => cardsForClass(cls).sort((a, b) => a.cost - b.cost || a.name.localeCompare(b.name)), [cls]);
+  const byCurve = (a: CardDef, b: CardDef) => a.cost - b.cost || a.name.localeCompare(b.name);
+  const classRewards = useMemo(
+    () => rewardCards().filter((c) => c.className === cls || c.className === "neutral"),
+    [cls],
+  );
+  // Base cards + reward cards you've unlocked are playable; the rest are shown locked.
+  const pool = useMemo(
+    () => [...cardsForClass(cls), ...classRewards.filter((c) => isCardUnlocked(c.id))].sort(byCurve),
+    [cls, classRewards],
+  );
+  const lockedRewards = useMemo(
+    () => classRewards.filter((c) => !isCardUnlocked(c.id)).sort(byCurve),
+    [classRewards],
+  );
   const counts = useMemo(() => {
     const m = new Map<string, number>();
     for (const id of deck) m.set(id, (m.get(id) ?? 0) + 1);
@@ -101,6 +118,9 @@ export function SetupScreen({ onStartLocal, onStartOnline }: Props) {
         >
           🌐 Play Online
         </button>
+        <button type="button" className="mode-btn mode-btn--campaign" onClick={onCampaign}>
+          🏰 Campaign
+        </button>
       </div>
 
       {mode === "online" && !onlineReachable() && (
@@ -155,6 +175,20 @@ export function SetupScreen({ onStartLocal, onStartOnline }: Props) {
                 </button>
               );
             })}
+            {lockedRewards.map((def) => (
+              <button
+                key={def.id}
+                type="button"
+                className="pool-card pool-card--locked"
+                disabled
+                title={`Locked — beat ${REWARD_SOURCE[def.id] ?? "a boss"} in the Campaign to unlock`}
+              >
+                <span className="pool-card__cost">{def.cost}</span>
+                <span className="pool-card__name">🔒 {def.name}</span>
+                <span className="pool-card__spell">beat {REWARD_SOURCE[def.id] ?? "a boss"}</span>
+                <span className="pool-card__leg">★</span>
+              </button>
+            ))}
           </div>
         </div>
 

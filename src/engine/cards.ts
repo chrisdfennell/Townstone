@@ -788,7 +788,132 @@ export const CARD_DEFS: CardDef[] = [
     flavor: "Step too close and the shadows bite back.",
   },
 
+  // ---- Deathrattle (base) --------------------------------------------------
+  {
+    id: "haunted_skeleton",
+    name: "Haunted Skeleton",
+    cost: 3,
+    type: "minion",
+    className: "necromancer",
+    attack: 2,
+    health: 2,
+    text: "Deathrattle: Summon a 1/1 Skeleton.",
+    onDeath: [{ kind: "summon", cardId: "skeleton_token", count: 1 }],
+    flavor: "It does not stay down for long.",
+  },
+  {
+    id: "graverobber",
+    name: "Graverobber",
+    cost: 2,
+    type: "minion",
+    className: "neutral",
+    attack: 2,
+    health: 2,
+    text: "Deathrattle: Draw a card.",
+    onDeath: [{ kind: "draw", amount: 1 }],
+    flavor: "Even in death, he's still taking things.",
+  },
+
+  // ---- Campaign reward legendaries (locked until earned) -------------------
+  {
+    id: "gluttony",
+    name: "Gluttony, the Mawing Hunger",
+    cost: 6,
+    type: "minion",
+    className: "neutral",
+    attack: 6,
+    health: 5,
+    legendary: true,
+    reward: true,
+    text: "Battlecry: Deal 3 damage to all other minions.",
+    onPlay: [{ kind: "damage", selector: "allEnemyMinions", amount: 3 }],
+    flavor: "It eats. That is all it has ever done.",
+  },
+  {
+    id: "vile_mother",
+    name: "The Vile Mother",
+    cost: 5,
+    type: "minion",
+    className: "necromancer",
+    attack: 3,
+    health: 4,
+    legendary: true,
+    reward: true,
+    text: "Deathrattle: Summon two 1/1 Poisonous Maggots.",
+    onDeath: [{ kind: "summon", cardId: "maggot", count: 2 }],
+    flavor: "Her brood inherits her appetite for ruin.",
+  },
+  {
+    id: "bone_colossus",
+    name: "Bone Colossus",
+    cost: 6,
+    type: "minion",
+    className: "necromancer",
+    attack: 5,
+    health: 6,
+    legendary: true,
+    reward: true,
+    text: "Deathrattle: Summon a Risen Horror.",
+    onDeath: [{ kind: "summon", cardId: "risen_horror", count: 1 }],
+    flavor: "Break it down and it only makes more of itself.",
+  },
+  {
+    id: "mephisto",
+    name: "Mephisto, Lord of Hatred",
+    cost: 7,
+    type: "minion",
+    className: "sorceress",
+    attack: 6,
+    health: 6,
+    legendary: true,
+    reward: true,
+    text: "Battlecry: Deal 3 damage to all enemy minions.",
+    onPlay: [{ kind: "damage", selector: "allEnemyMinions", amount: 3 }],
+    flavor: "Hatred given form, and form given hunger.",
+  },
+  {
+    id: "prime_diablo",
+    name: "Diablo, Prime Evil",
+    cost: 10,
+    type: "minion",
+    className: "neutral",
+    attack: 10,
+    health: 10,
+    keywords: ["charge"],
+    legendary: true,
+    reward: true,
+    text: "Charge. Battlecry: Deal 5 damage to the enemy hero.",
+    onPlay: [{ kind: "damage", selector: "enemyHero", amount: 5 }],
+    flavor: "All the Evils, bound in one terrible crown.",
+  },
+
   // ---- Tokens & special (uncollectible) ------------------------------------
+  {
+    id: "maggot",
+    name: "Maggot",
+    cost: 1,
+    type: "minion",
+    className: "neutral",
+    attack: 1,
+    health: 1,
+    keywords: ["poisonous"],
+    uncollectible: true,
+    text: "Poisonous",
+    flavor: "Small. Patient. Lethal.",
+  },
+  {
+    id: "risen_horror",
+    name: "Risen Horror",
+    cost: 2,
+    type: "minion",
+    className: "neutral",
+    attack: 2,
+    health: 2,
+    uncollectible: true,
+    text: "Deathrattle: Summon a 1/1 Skeleton.",
+    onDeath: [{ kind: "summon", cardId: "skeleton_token", count: 1 }],
+    flavor: "Death is a door it keeps walking back through.",
+  },
   {
     id: "silver_hand_recruit",
     name: "Silver Hand Recruit",
@@ -858,9 +983,15 @@ export function getCardDef(id: string): CardDef {
   return def;
 }
 
-/** All cards a player may put in a deck (excludes tokens, coin, etc.). */
+/** Base cards available to everyone (excludes tokens and locked rewards). Used
+ *  for default decks, Discover pools, and the AI — never includes campaign rewards. */
 export function collectibleCards(): CardDef[] {
-  return CARD_DEFS.filter((c) => !c.uncollectible);
+  return CARD_DEFS.filter((c) => !c.uncollectible && !c.reward);
+}
+
+/** Campaign reward cards (unlocked by beating bosses). */
+export function rewardCards(): CardDef[] {
+  return CARD_DEFS.filter((c) => c.reward);
 }
 
 /** Cards available to a given class: that class plus neutrals. */

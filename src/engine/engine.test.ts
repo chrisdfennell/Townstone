@@ -14,7 +14,7 @@ import {
   RULES,
 } from "./engine";
 import { runAiTurn } from "./ai";
-import { classDeck, getCardDef } from "./cards";
+import { classDeck, collectibleCards, getCardDef, rewardCards } from "./cards";
 import { PLAYABLE_CLASSES } from "./types";
 import type { GameState, HeroClass, Minion } from "./types";
 
@@ -210,6 +210,31 @@ describe("new effects & classes", () => {
   });
 });
 
+describe("secret-aware AI", () => {
+  it("baits a hero-attack Secret with its weakest minion, sparing the big one", () => {
+    let g = started({});
+    g = endTurn(g, "player"); // hand the turn to the AI
+    g = structuredClone(g);
+    g.players.ai.hand = [];
+    g.players.ai.mana = 0; // no plays/power — isolate the attack sequencing
+    g.players.ai.board = [
+      craftMinion({ instanceId: "small", attack: 1, health: 1 }),
+      craftMinion({ instanceId: "big", attack: 5, health: 5 }),
+    ];
+    g.players.player.board = [];
+    g.players.player.hero.health = 10;
+    g.players.player.hero.armor = 0;
+    g.players.player.secrets = [{ instanceId: "bt", defId: "bladed_trap" }];
+
+    const frames = runAiTurn(g);
+    const final = frames[frames.length - 1];
+    // The 1/1 was thrown at the trap; the 5/5 survived and connected for 5.
+    expect(final.players.ai.board.find((m) => m.instanceId === "small")).toBeUndefined();
+    expect(final.players.ai.board.find((m) => m.instanceId === "big")).toBeDefined();
+    expect(final.players.player.hero.health).toBe(5);
+  });
+});
+
 describe("Discover", () => {
   it("opens a 3-card choice that blocks other actions until resolved", () => {
     const s = structuredClone(started({}));
@@ -280,6 +305,41 @@ describe("Secrets", () => {
     const after = attack(s, "player", "atk", { kind: "hero", player: "ai" });
     expect(findMinion(after, "atk")).toBeUndefined();
     expect(after.players.ai.hero.health).toBe(30);
+  });
+});
+
+describe("deathrattle chains & rewards", () => {
+  it("Bone Colossus chains: Colossus -> Risen Horror -> Skeleton", () => {
+    const s = structuredClone(started({}));
+    s.players.player.mana = 10;
+    s.players.player.board.push(
+      craftMinion({
+        instanceId: "col",
+        defId: "bone_colossus",
+        attack: 5,
+        health: 1,
+        onDeath: [{ kind: "summon", cardId: "risen_horror", count: 1 }],
+      }),
+    );
+    s.players.player.hand.push({ instanceId: "fb1", defId: "firebolt" });
+    s.players.player.hand.push({ instanceId: "fb2", defId: "firebolt" });
+
+    let after = playCard(s, "player", "fb1", { target: { kind: "minion", instanceId: "col" } });
+    const horror = after.players.player.board.find((m) => m.defId === "risen_horror");
+    expect(horror).toBeDefined();
+
+    after = playCard(after, "player", "fb2", { target: { kind: "minion", instanceId: horror!.instanceId } });
+    expect(after.players.player.board.some((m) => m.defId === "skeleton_token")).toBe(true);
+  });
+
+  it("reward cards are excluded from base/default pools but listed as rewards", () => {
+    expect(collectibleCards().some((c) => c.reward)).toBe(false);
+    expect(rewardCards().length).toBeGreaterThan(0);
+    // Default decks never contain reward legendaries.
+    for (const cls of PLAYABLE_CLASSES) {
+      const deck = classDeck(cls);
+      expect(deck.every((id) => !getCardDef(id).reward)).toBe(true);
+    }
   });
 });
 

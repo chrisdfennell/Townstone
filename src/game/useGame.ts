@@ -18,7 +18,7 @@ import {
   validAttackTargets,
   validTargets,
 } from "../engine";
-import type { AiDifficulty, CharacterRef, GameState, HeroClass, PlayerId } from "../engine";
+import type { AiDifficulty, CharacterRef, GameState, HeroClass, HeroPower, PlayerId } from "../engine";
 
 const AI_FRAME_DELAY_MS = 850;
 
@@ -28,6 +28,8 @@ export interface GameConfig {
   aiClass: HeroClass;
   aiDeck: string[];
   difficulty: AiDifficulty;
+  /** Hero Power override for the AI (campaign bosses). */
+  aiPower?: HeroPower;
   seed?: number;
 }
 
@@ -63,6 +65,7 @@ export function useGame(config: GameConfig): UseGame {
       playerDeck: config.playerDeck,
       aiClass: config.aiClass,
       aiDeck: config.aiDeck,
+      aiPower: config.aiPower,
       seed: config.seed,
     }),
   );

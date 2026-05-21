@@ -1,16 +1,23 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CLASS_LABEL } from "./engine";
+import type { HeroClass, PlayerId } from "./engine";
 import { useGame, type GameConfig, type UseGame } from "./game/useGame";
 import { useOnlineGame, type OnlineConfig, type OnlineStatus } from "./game/useOnlineGame";
+import { BOSSES, bossDeck } from "./game/campaign";
+import { loadDeck } from "./game/deckStore";
+import { markBossBeaten, unlockCard } from "./game/collection";
 import { GameBoard } from "./components/GameBoard";
 import { SetupScreen } from "./components/SetupScreen";
+import { CampaignScreen } from "./components/CampaignScreen";
 
-type Mode = "setup" | "local" | "online";
+type Mode = "setup" | "local" | "online" | "campaign" | "campaign-fight";
 
 export function App() {
   const [mode, setMode] = useState<Mode>("setup");
   const [localConfig, setLocalConfig] = useState<GameConfig | null>(null);
   const [onlineConfig, setOnlineConfig] = useState<OnlineConfig | null>(null);
+  const [campaignBossId, setCampaignBossId] = useState<string | null>(null);
+  const [justUnlocked, setJustUnlocked] = useState<string | null>(null);
   // Bumping the key remounts the game for a fresh rematch.
   const [gameKey, setGameKey] = useState(0);
 
@@ -34,6 +41,51 @@ export function App() {
       />
     );
   }
+  if (mode === "campaign-fight" && localConfig && campaignBossId) {
+    const boss = BOSSES.find((b) => b.id === campaignBossId)!;
+    return (
+      <LocalGame
+        key={gameKey}
+        config={localConfig}
+        enemyName={`${boss.name}, ${boss.title}`}
+        onExit={() => setMode("campaign")}
+        onRematch={() => setGameKey((k) => k + 1)}
+        onResult={(winner) => {
+          if (winner === "player") {
+            markBossBeaten(boss.id);
+            unlockCard(boss.rewardCardId);
+            setJustUnlocked(boss.rewardCardId);
+          }
+        }}
+      />
+    );
+  }
+  if (mode === "campaign") {
+    return (
+      <CampaignScreen
+        justUnlocked={justUnlocked}
+        onExit={() => {
+          setJustUnlocked(null);
+          setMode("setup");
+        }}
+        onFight={(bossId, playerClass) => {
+          const boss = BOSSES.find((b) => b.id === bossId)!;
+          setJustUnlocked(null);
+          setCampaignBossId(bossId);
+          setLocalConfig({
+            playerClass,
+            playerDeck: loadDeck(playerClass),
+            aiClass: boss.deckClass,
+            aiDeck: bossDeck(boss),
+            aiPower: boss.power,
+            difficulty: "normal",
+          });
+          setGameKey((k) => k + 1);
+          setMode("campaign-fight");
+        }}
+      />
+    );
+  }
 
   return (
     <SetupScreen
@@ -47,17 +99,44 @@ export function App() {
         setGameKey((k) => k + 1);
         setMode("online");
       }}
+      onCampaign={() => {
+        setJustUnlocked(null);
+        setMode("campaign");
+      }}
     />
   );
 }
 
-function LocalGame({ config, onExit, onRematch }: { config: GameConfig; onExit: () => void; onRematch: () => void }) {
+function LocalGame({
+  config,
+  onExit,
+  onRematch,
+  enemyName,
+  onResult,
+}: {
+  config: GameConfig;
+  onExit: () => void;
+  onRematch: () => void;
+  enemyName?: string;
+  onResult?: (winner: PlayerId | null) => void;
+}) {
   const ctrl = useGame(config);
+  const reported = useRef(false);
+
+  // Report the outcome once when the game ends (drives campaign unlocks).
+  useEffect(() => {
+    if (ctrl.state.phase === "gameOver" && !reported.current) {
+      reported.current = true;
+      onResult?.(ctrl.state.winner);
+    }
+  }, [ctrl.state.phase, ctrl.state.winner, onResult]);
+
+  const enemyClass: HeroClass = ctrl.state.players.ai.hero.className;
   return (
     <GameBoard
       ctrl={ctrl}
       selfName="You"
-      enemyName={`The Dark ${CLASS_LABEL[ctrl.state.players.ai.hero.className]}`}
+      enemyName={enemyName ?? `The Dark ${CLASS_LABEL[enemyClass]}`}
       showMulligan={ctrl.state.phase === "mulligan"}
       onExit={onExit}
       onRematch={onRematch}
