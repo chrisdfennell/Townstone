@@ -1,198 +1,127 @@
-import { useMemo, useState } from "react";
-import { useGame, type GameConfig } from "./game/useGame";
-import { useHealthDeltas } from "./game/useHealthDeltas";
-import { canAttack as engineCanAttack, canPlayCard, canUseHeroPower, sameRef, CLASS_LABEL } from "./engine";
-import type { CharacterRef, GameState, Minion, PlayerId } from "./engine";
-import { HandCard } from "./components/HandCard";
-import { MinionView } from "./components/MinionView";
-import { HeroView } from "./components/HeroView";
-import { MulliganModal } from "./components/MulliganModal";
+import { useState } from "react";
+import { CLASS_LABEL } from "./engine";
+import { useGame, type GameConfig, type UseGame } from "./game/useGame";
+import { useOnlineGame, type OnlineConfig, type OnlineStatus } from "./game/useOnlineGame";
+import { GameBoard } from "./components/GameBoard";
 import { SetupScreen } from "./components/SetupScreen";
-import type { HealthDelta } from "./components/FloatingNumber";
+
+type Mode = "setup" | "local" | "online";
 
 export function App() {
-  // `config` null => show the setup/deckbuilder screen.
-  const [config, setConfig] = useState<GameConfig | null>(null);
-  // Bumping this key remounts the game (fresh useGame state) for a rematch.
+  const [mode, setMode] = useState<Mode>("setup");
+  const [localConfig, setLocalConfig] = useState<GameConfig | null>(null);
+  const [onlineConfig, setOnlineConfig] = useState<OnlineConfig | null>(null);
+  // Bumping the key remounts the game for a fresh rematch.
   const [gameKey, setGameKey] = useState(0);
 
-  if (!config) return <SetupScreen onStart={setConfig} />;
+  if (mode === "local" && localConfig) {
+    return (
+      <LocalGame
+        key={gameKey}
+        config={localConfig}
+        onExit={() => setMode("setup")}
+        onRematch={() => setGameKey((k) => k + 1)}
+      />
+    );
+  }
+  if (mode === "online" && onlineConfig) {
+    return <OnlineGame key={gameKey} config={onlineConfig} onExit={() => setMode("setup")} />;
+  }
 
   return (
-    <GameView
-      key={gameKey}
-      config={config}
-      onRematch={() => setGameKey((k) => k + 1)}
-      onExit={() => setConfig(null)}
+    <SetupScreen
+      onStartLocal={(c) => {
+        setLocalConfig(c);
+        setGameKey((k) => k + 1);
+        setMode("local");
+      }}
+      onStartOnline={(c) => {
+        setOnlineConfig(c);
+        setGameKey((k) => k + 1);
+        setMode("online");
+      }}
     />
   );
 }
 
-function GameView({ config, onRematch, onExit }: { config: GameConfig; onRematch: () => void; onExit: () => void }) {
-  const g = useGame(config);
-  const { state } = g;
-  const deltas = useHealthDeltas(state);
-  const player = state.players.player;
-  const ai = state.players.ai;
-
-  const recentLog = useMemo(() => state.log.slice(-6).reverse(), [state.log]);
-
-  const turnLabel =
-    state.phase === "gameOver"
-      ? "Game Over"
-      : state.phase === "mulligan"
-        ? "Mulligan"
-        : g.aiThinking
-          ? "Enemy is plotting…"
-          : g.isMyTurn
-            ? "Your Turn"
-            : "Enemy Turn";
-
+function LocalGame({ config, onExit, onRematch }: { config: GameConfig; onExit: () => void; onRematch: () => void }) {
+  const ctrl = useGame(config);
   return (
-    <div className="app" onClick={g.clickBoard}>
-      <header className="topbar">
-        <h1 className="logo">
-          Town<span>stone</span>
-        </h1>
-        <div className={"turn-banner" + (g.isMyTurn ? " turn-banner--mine" : "")}>{turnLabel}</div>
-        <div className="topbar__btns">
-          <button type="button" className="btn btn--ghost" onClick={(e) => { e.stopPropagation(); onRematch(); }}>
-            Rematch
-          </button>
-          <button type="button" className="btn btn--ghost" onClick={(e) => { e.stopPropagation(); onExit(); }}>
-            Main Menu
-          </button>
-        </div>
-      </header>
-
-      <main className="battlefield" onClick={(e) => e.stopPropagation()}>
-        <HeroView
-          hero={ai.hero}
-          player="ai"
-          name={`The Dark ${CLASS_LABEL[ai.hero.className]}`}
-          mana={ai.mana}
-          maxMana={ai.maxMana}
-          deckCount={ai.deck.length}
-          handCount={ai.hand.length}
-          targetable={isTargeted(g.highlightedTargets, { kind: "hero", player: "ai" })}
-          delta={deltas.get("hero:ai")}
-          onClick={() => g.clickHero("ai")}
-        />
-
-        <Board owner="ai" minions={ai.board} g={g} state={state} deltas={deltas} />
-
-        <div className="midline">
-          <span className="midline__rune">✦ ✦ ✦</span>
-        </div>
-
-        <Board owner="player" minions={player.board} g={g} state={state} deltas={deltas} />
-
-        <HeroView
-          hero={player.hero}
-          player="player"
-          name={`You — ${CLASS_LABEL[player.hero.className]}`}
-          mana={player.mana}
-          maxMana={player.maxMana}
-          deckCount={player.deck.length}
-          handCount={player.hand.length}
-          targetable={isTargeted(g.highlightedTargets, { kind: "hero", player: "player" })}
-          delta={deltas.get("hero:player")}
-          canUsePower={g.isMyTurn && canUseHeroPower(state, "player")}
-          powerSelected={g.pending?.kind === "power"}
-          onUsePower={g.clickHeroPower}
-          onClick={() => g.clickHero("player")}
-        />
-      </main>
-
-      <section className="hand" onClick={(e) => e.stopPropagation()}>
-        {player.hand.map((card) => (
-          <HandCard
-            key={card.instanceId}
-            card={card}
-            playable={g.isMyTurn && canPlayCard(state, "player", card.instanceId)}
-            selected={g.pending?.kind === "card" && g.pending.instanceId === card.instanceId}
-            onClick={() => g.clickHandCard(card.instanceId)}
-          />
-        ))}
-        {player.hand.length === 0 && <span className="hand__empty">No cards in hand.</span>}
-      </section>
-
-      <footer className="controls" onClick={(e) => e.stopPropagation()}>
-        <div className="log">
-          {recentLog.map((line, i) => (
-            <div key={state.log.length - i} className={"log__line" + (i === 0 ? " log__line--new" : "")}>
-              {line}
-            </div>
-          ))}
-        </div>
-        <button type="button" className="btn btn--primary" disabled={!g.isMyTurn} onClick={g.endMyTurn}>
-          End Turn
-        </button>
-      </footer>
-
-      {state.phase === "mulligan" && (
-        <MulliganModal
-          hand={player.hand}
-          choices={g.mulliganChoices}
-          goingFirst={state.first === "player"}
-          onToggle={g.toggleMulligan}
-          onConfirm={g.confirmMulligan}
-        />
-      )}
-
-      {state.phase === "gameOver" && (
-        <div className="overlay" onClick={(e) => e.stopPropagation()}>
-          <div className="overlay__panel">
-            <h2>{state.winner === "player" ? "Victory" : state.winner === "ai" ? "Defeat" : "Draw"}</h2>
-            <p>
-              {state.winner === "player"
-                ? "The Dark Wanderer falls before you."
-                : state.winner === "ai"
-                  ? "Darkness claims another hero…"
-                  : "Both heroes are consumed."}
-            </p>
-            <div className="overlay__btns">
-              <button type="button" className="btn btn--primary" onClick={onRematch}>
-                Rematch
-              </button>
-              <button type="button" className="btn btn--ghost" onClick={onExit}>
-                Main Menu
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+    <GameBoard
+      ctrl={ctrl}
+      selfName="You"
+      enemyName={`The Dark ${CLASS_LABEL[ctrl.state.players.ai.hero.className]}`}
+      showMulligan={ctrl.state.phase === "mulligan"}
+      onExit={onExit}
+      onRematch={onRematch}
+    />
   );
 }
 
-function isTargeted(targets: CharacterRef[], ref: CharacterRef): boolean {
-  return targets.some((t) => sameRef(t, ref));
-}
+function OnlineGame({ config, onExit }: { config: OnlineConfig; onExit: () => void }) {
+  const ctrl = useOnlineGame(config);
 
-interface BoardProps {
-  owner: PlayerId;
-  minions: Minion[];
-  g: ReturnType<typeof useGame>;
-  state: GameState;
-  deltas: Map<string, HealthDelta>;
-}
+  if (!ctrl.state) return <ConnectionScreen status={ctrl.status} onExit={onExit} />;
 
-function Board({ owner, minions, g, state, deltas }: BoardProps) {
+  const gameCtrl = { ...ctrl, state: ctrl.state } as UseGame;
+  const showMulligan = ctrl.status === "mulligan" && !ctrl.mulliganSubmitted;
+
+  let banner = null;
+  if (ctrl.status === "opponentLeft" && ctrl.state.phase !== "gameOver") {
+    banner = (
+      <div className="overlay">
+        <div className="overlay__panel">
+          <h2>Opponent Left</h2>
+          <p>Your foe has fled the battle.</p>
+          <button type="button" className="btn btn--primary" onClick={onExit}>
+            Main Menu
+          </button>
+        </div>
+      </div>
+    );
+  } else if (showMulligan === false && ctrl.status === "mulligan" && ctrl.mulliganSubmitted) {
+    banner = (
+      <div className="overlay">
+        <div className="overlay__panel">
+          <h2>Ready</h2>
+          <p>Waiting for {ctrl.opponentName} to choose their hand…</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className={"board board--" + owner}>
-      {minions.length === 0 && <span className="board__empty">— empty —</span>}
-      {minions.map((m) => (
-        <MinionView
-          key={m.instanceId}
-          minion={m}
-          canAttack={owner === "player" && engineCanAttack(state, "player", m.instanceId)}
-          selected={g.selectedAttackerId === m.instanceId}
-          targetable={isTargeted(g.highlightedTargets, { kind: "minion", instanceId: m.instanceId })}
-          delta={deltas.get(m.instanceId)}
-          onClick={() => g.clickMinion(m.instanceId, owner)}
-        />
-      ))}
+    <GameBoard
+      ctrl={gameCtrl}
+      selfName={config.name}
+      enemyName={ctrl.opponentName}
+      showMulligan={showMulligan}
+      onExit={onExit}
+      banner={banner}
+    />
+  );
+}
+
+function ConnectionScreen({ status, onExit }: { status: OnlineStatus; onExit: () => void }) {
+  const message: Record<OnlineStatus, string> = {
+    connecting: "Reaching the server…",
+    waiting: "Searching for a worthy opponent…",
+    mulligan: "Match found! Preparing the battle…",
+    playing: "Entering the battle…",
+    gameOver: "The battle has ended.",
+    opponentLeft: "No opponent could be found.",
+    error: "Could not reach the server. Make sure it is running (npm run server).",
+  };
+  return (
+    <div className="setup conn-screen">
+      <h1 className="logo logo--big">
+        Town<span>stone</span>
+      </h1>
+      <p className="conn-screen__status">{message[status]}</p>
+      {(status === "waiting" || status === "connecting") && <div className="conn-spinner" aria-hidden />}
+      <button type="button" className="btn btn--ghost" onClick={onExit}>
+        Cancel
+      </button>
     </div>
   );
 }

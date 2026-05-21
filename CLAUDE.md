@@ -4,8 +4,10 @@ Diablo-themed Hearthstone-like card game. Web (TypeScript + React + Vite),
 single-player vs AI now, multiplayer later.
 
 ## Commands
-- `npm run dev` — dev server (http://localhost:5173)
-- `npm test` — Vitest engine tests
+- `npm run dev` — web client (http://localhost:5173)
+- `npm run server` — multiplayer WebSocket server (ws://localhost:8787)
+- `npm run dev:all` — both, for online play
+- `npm test` — Vitest engine + server tests
 - `npm run build` — typecheck + production build
 
 ## Architecture (important)
@@ -20,9 +22,16 @@ single-player vs AI now, multiplayer later.
   new mechanics as new `Effect` kinds + handling in `resolveEffect`, not ad-hoc.
 - UI talks to the engine only through `src/game/useGame.ts`.
 - The AI (`ai.ts`) is search-based: `evaluateState` scores a board and `runAiTurn`
-  runs a beam search (width/depth/budget constants at the top) over legal action
+  runs a beam search (profiles in `DIFFICULTY_PROFILES`) over legal action
   sequences, simulating with the pure engine. To tune AI strength, adjust
-  `evaluateState` weights or the beam constants — keep `runAiTurn` returning frames.
+  `evaluateState` weights or the difficulty profiles — keep `runAiTurn` returning frames.
+- Multiplayer (`server/`) reuses the SAME engine. The server keeps the canonical
+  game with seats "player"/"ai"; `server/perspective.ts` rewrites each broadcast so
+  the recipient is always "player" and the opponent's hand/deck are redacted to
+  `"__hidden__"`. Client actions are authored in the sender's own perspective;
+  `refFromViewer` maps hero refs back to canonical seats (minion ids are global).
+  `useOnlineGame` mirrors the `UseGame` interface so `GameBoard` is shared between
+  local and online play. Never trust client decks — `sanitizeDeck` validates them.
 
 ## Conventions
 - Keep new cards in `cards.ts`; reference by `id`. Add to `starterDeck()` to make

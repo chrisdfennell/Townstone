@@ -936,3 +936,64 @@ body {
   color: var(--blood-bright);
   box-shadow: 0 0 12px rgba(201, 42, 42, 0.25);
 }
+
+/* ---- Mode toggle (vs Computer / Online) ---- */
+.mode-toggle {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  margin-bottom: 22px;
+}
+.mode-btn {
+  padding: 10px 22px;
+  border-radius: 4px;
+  border: 1px solid var(--stone-light);
+  background: linear-gradient(180deg, #221913, #140d08);
+  color: var(--text-dim);
+  cursor: pointer;
+  font-family: var(--font-head);
+  letter-spacing: 1px;
+  transition: border-color 0.1s, color 0.1s, box-shadow 0.1s;
+}
+.mode-btn--active {
+  border-color: var(--gold);
+  color: var(--ember);
+  box-shadow: 0 0 14px rgba(201, 162, 39, 0.25);
+}
+.name-input {
+  flex: 1;
+  padding: 8px 12px;
+  border-radius: 4px;
+  border: 1px solid var(--stone-light);
+  background: #140d08;
+  color: var(--text);
+  font-size: 14px;
+}
+.name-input:focus {
+  outline: none;
+  border-color: var(--gold);
+}
+
+/* ---- Connection screen ---- */
+.conn-screen {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 18px;
+}
+.conn-screen__status {
+  color: var(--text-dim);
+  font-size: 16px;
+  max-width: 480px;
+}
+.conn-spinner {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 4px solid var(--stone-light);
+  border-top-color: var(--ember);
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

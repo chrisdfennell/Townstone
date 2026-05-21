@@ -10,9 +10,11 @@ import {
 import type { AiDifficulty, HeroClass } from "../engine";
 import { DECK_SIZE, copyLimit, loadDeck, saveDeck } from "../game/deckStore";
 import type { GameConfig } from "../game/useGame";
+import type { OnlineConfig } from "../game/useOnlineGame";
 
 interface Props {
-  onStart: (config: GameConfig) => void;
+  onStartLocal: (config: GameConfig) => void;
+  onStartOnline: (config: OnlineConfig) => void;
 }
 
 const DIFFICULTIES: Array<{ id: AiDifficulty; label: string; blurb: string }> = [
@@ -21,7 +23,9 @@ const DIFFICULTIES: Array<{ id: AiDifficulty; label: string; blurb: string }> = 
   { id: "nightmare", label: "Nightmare", blurb: "Deep search, near-optimal." },
 ];
 
-export function SetupScreen({ onStart }: Props) {
+export function SetupScreen({ onStartLocal, onStartOnline }: Props) {
+  const [mode, setMode] = useState<"ai" | "online">("ai");
+  const [name, setName] = useState("Challenger");
   const [cls, setCls] = useState<HeroClass>("barbarian");
   const [deck, setDeck] = useState<string[]>(() => loadDeck("barbarian"));
   const [difficulty, setDifficulty] = useState<AiDifficulty>("normal");
@@ -62,8 +66,12 @@ export function SetupScreen({ onStart }: Props) {
   );
 
   const start = () => {
-    const aiClass = PLAYABLE_CLASSES[Math.floor(Math.random() * PLAYABLE_CLASSES.length)];
-    onStart({ playerClass: cls, playerDeck: deck, aiClass, aiDeck: classDeck(aiClass), difficulty });
+    if (mode === "ai") {
+      const aiClass = PLAYABLE_CLASSES[Math.floor(Math.random() * PLAYABLE_CLASSES.length)];
+      onStartLocal({ playerClass: cls, playerDeck: deck, aiClass, aiDeck: classDeck(aiClass), difficulty });
+    } else {
+      onStartOnline({ name: name.trim() || "Challenger", playerClass: cls, playerDeck: deck });
+    }
   };
 
   return (
@@ -72,6 +80,23 @@ export function SetupScreen({ onStart }: Props) {
         Town<span>stone</span>
       </h1>
       <p className="setup__tag">Choose your champion and forge a deck of 30 cards.</p>
+
+      <div className="mode-toggle">
+        <button
+          type="button"
+          className={"mode-btn" + (mode === "ai" ? " mode-btn--active" : "")}
+          onClick={() => setMode("ai")}
+        >
+          ⚔ vs Computer
+        </button>
+        <button
+          type="button"
+          className={"mode-btn" + (mode === "online" ? " mode-btn--active" : "")}
+          onClick={() => setMode("online")}
+        >
+          🌐 Play Online
+        </button>
+      </div>
 
       <div className="class-picker">
         {PLAYABLE_CLASSES.map((c) => (
@@ -137,29 +162,42 @@ export function SetupScreen({ onStart }: Props) {
               </button>
             ))}
           </div>
-          <div className="difficulty">
-            <span className="difficulty__label">Opponent</span>
-            <div className="difficulty__opts">
-              {DIFFICULTIES.map((d) => (
-                <button
-                  key={d.id}
-                  type="button"
-                  className={"diff-btn" + (difficulty === d.id ? " diff-btn--active" : "")}
-                  onClick={() => setDifficulty(d.id)}
-                  title={d.blurb}
-                >
-                  {d.label}
-                </button>
-              ))}
+          {mode === "ai" ? (
+            <div className="difficulty">
+              <span className="difficulty__label">Opponent</span>
+              <div className="difficulty__opts">
+                {DIFFICULTIES.map((d) => (
+                  <button
+                    key={d.id}
+                    type="button"
+                    className={"diff-btn" + (difficulty === d.id ? " diff-btn--active" : "")}
+                    onClick={() => setDifficulty(d.id)}
+                    title={d.blurb}
+                  >
+                    {d.label}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="difficulty">
+              <span className="difficulty__label">Name</span>
+              <input
+                className="name-input"
+                value={name}
+                maxLength={24}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Challenger"
+              />
+            </div>
+          )}
 
           <div className="builder__actions">
             <button type="button" className="btn btn--ghost" onClick={() => setDeck(classDeck(cls))}>
               Reset to Default
             </button>
             <button type="button" className="btn btn--primary" disabled={deck.length !== DECK_SIZE} onClick={start}>
-              Enter Battle
+              {mode === "ai" ? "Enter Battle" : "Find Match"}
             </button>
           </div>
         </div>
