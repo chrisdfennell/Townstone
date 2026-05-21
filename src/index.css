@@ -898,3 +898,41 @@ body {
   gap: 10px;
   justify-content: space-between;
 }
+
+/* ---- Difficulty picker ---- */
+.difficulty {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 4px 0 12px;
+}
+.difficulty__label {
+  font-family: var(--font-head);
+  letter-spacing: 1px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+.difficulty__opts {
+  display: flex;
+  gap: 6px;
+  flex: 1;
+}
+.diff-btn {
+  flex: 1;
+  padding: 8px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--stone-light);
+  background: linear-gradient(180deg, #221913, #140d08);
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 13px;
+  transition: border-color 0.1s, color 0.1s, box-shadow 0.1s;
+}
+.diff-btn:hover {
+  color: var(--text);
+}
+.diff-btn--active {
+  border-color: var(--blood);
+  color: var(--blood-bright);
+  box-shadow: 0 0 12px rgba(201, 42, 42, 0.25);
+}

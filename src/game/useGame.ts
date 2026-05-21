@@ -17,7 +17,7 @@ import {
   validAttackTargets,
   validTargets,
 } from "../engine";
-import type { CharacterRef, GameState, HeroClass, PlayerId } from "../engine";
+import type { AiDifficulty, CharacterRef, GameState, HeroClass, PlayerId } from "../engine";
 
 const AI_FRAME_DELAY_MS = 850;
 
@@ -26,6 +26,7 @@ export interface GameConfig {
   playerDeck: string[];
   aiClass: HeroClass;
   aiDeck: string[];
+  difficulty: AiDifficulty;
   seed?: number;
 }
 
@@ -79,7 +80,7 @@ export function useGame(config: GameConfig): UseGame {
     if (state.phase !== "playing" || state.current !== "ai" || aiThinking) return;
     setAiThinking(true);
     clearSelection();
-    const frames = runAiTurn(state);
+    const frames = runAiTurn(state, config.difficulty);
     let i = 0;
     const playNext = () => {
       if (i < frames.length) {

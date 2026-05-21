@@ -7,7 +7,7 @@ import {
   classDeck,
   getCardDef,
 } from "../engine";
-import type { HeroClass } from "../engine";
+import type { AiDifficulty, HeroClass } from "../engine";
 import { DECK_SIZE, copyLimit, loadDeck, saveDeck } from "../game/deckStore";
 import type { GameConfig } from "../game/useGame";
 
@@ -15,9 +15,16 @@ interface Props {
   onStart: (config: GameConfig) => void;
 }
 
+const DIFFICULTIES: Array<{ id: AiDifficulty; label: string; blurb: string }> = [
+  { id: "easy", label: "Easy", blurb: "Plays greedily and makes mistakes." },
+  { id: "normal", label: "Normal", blurb: "Searches ahead for solid lines." },
+  { id: "nightmare", label: "Nightmare", blurb: "Deep search, near-optimal." },
+];
+
 export function SetupScreen({ onStart }: Props) {
   const [cls, setCls] = useState<HeroClass>("barbarian");
   const [deck, setDeck] = useState<string[]>(() => loadDeck("barbarian"));
+  const [difficulty, setDifficulty] = useState<AiDifficulty>("normal");
 
   // Switching class loads that class's saved (or default) deck.
   useEffect(() => {
@@ -56,7 +63,7 @@ export function SetupScreen({ onStart }: Props) {
 
   const start = () => {
     const aiClass = PLAYABLE_CLASSES[Math.floor(Math.random() * PLAYABLE_CLASSES.length)];
-    onStart({ playerClass: cls, playerDeck: deck, aiClass, aiDeck: classDeck(aiClass) });
+    onStart({ playerClass: cls, playerDeck: deck, aiClass, aiDeck: classDeck(aiClass), difficulty });
   };
 
   return (
@@ -130,6 +137,23 @@ export function SetupScreen({ onStart }: Props) {
               </button>
             ))}
           </div>
+          <div className="difficulty">
+            <span className="difficulty__label">Opponent</span>
+            <div className="difficulty__opts">
+              {DIFFICULTIES.map((d) => (
+                <button
+                  key={d.id}
+                  type="button"
+                  className={"diff-btn" + (difficulty === d.id ? " diff-btn--active" : "")}
+                  onClick={() => setDifficulty(d.id)}
+                  title={d.blurb}
+                >
+                  {d.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <div className="builder__actions">
             <button type="button" className="btn btn--ghost" onClick={() => setDeck(classDeck(cls))}>
               Reset to Default

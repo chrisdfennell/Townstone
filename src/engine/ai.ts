@@ -23,21 +23,45 @@ import {
  * Returns intermediate states ("frames") for the best line so the UI can replay
  * the turn one action at a time. The caller ends the turn afterward.
  */
-const BEAM_WIDTH = 8;
-const MAX_DEPTH = 18;
-/** Hard cap on simulated actions per turn, to keep planning snappy. */
-const EXPANSION_BUDGET = 6000;
-
 const WIN_SCORE = 1_000_000;
 
-export function runAiTurn(start: GameState): GameState[] {
+export type AiDifficulty = "easy" | "normal" | "nightmare";
+
+interface SearchProfile {
+  beamWidth: number;
+  maxDepth: number;
+  /** Hard cap on simulated actions per turn, to keep planning snappy. */
+  budget: number;
+  /** Random swing added to each evaluation so weaker AIs misjudge trades. */
+  noise: number;
+}
+
+export const DIFFICULTY_PROFILES: Record<AiDifficulty, SearchProfile> = {
+  // Greedy + shallow + noisy: misses combos and sequencing, very beatable.
+  easy: { beamWidth: 1, maxDepth: 6, budget: 800, noise: 6 },
+  // The full search introduced with the smarter AI.
+  normal: { beamWidth: 8, maxDepth: 18, budget: 6000, noise: 0 },
+  // Wider + deeper: squeezes out optimal lines and long lethals.
+  nightmare: { beamWidth: 14, maxDepth: 24, budget: 16000, noise: 0 },
+};
+
+export function runAiTurn(start: GameState, difficulty: AiDifficulty = "normal"): GameState[] {
   const me: PlayerId = "ai";
+  const profile = DIFFICULTY_PROFILES[difficulty] ?? DIFFICULTY_PROFILES.normal;
 
-  let beam: Node[] = [{ state: start, path: [], score: evaluateState(start, me) }];
+  // A win is always taken regardless of noise; noise only perturbs ordinary
+  // positional judgment.
+  const scoreFor = (s: GameState): number => {
+    const base = evaluateState(s, me);
+    if (Math.abs(base) >= WIN_SCORE) return base;
+    return base + (profile.noise > 0 ? (Math.random() * 2 - 1) * profile.noise : 0);
+  };
+
+  let beam: Node[] = [{ state: start, path: [], score: scoreFor(start) }];
   let best: Node = beam[0];
-  let budget = EXPANSION_BUDGET;
+  let budget = profile.budget;
 
-  for (let depth = 0; depth < MAX_DEPTH && budget > 0; depth++) {
+  for (let depth = 0; depth < profile.maxDepth && budget > 0; depth++) {
     const children: Node[] = [];
     for (const node of beam) {
       if (node.state.phase !== "playing") continue;
@@ -45,7 +69,7 @@ export function runAiTurn(start: GameState): GameState[] {
         if (budget-- <= 0) break;
         const ns = applyAction(node.state, me, action);
         if (ns === node.state) continue; // illegal / no-op
-        const child: Node = { state: ns, path: [...node.path, ns], score: evaluateState(ns, me) };
+        const child: Node = { state: ns, path: [...node.path, ns], score: scoreFor(ns) };
         children.push(child);
         if (child.score > best.score) best = child;
       }
@@ -53,7 +77,7 @@ export function runAiTurn(start: GameState): GameState[] {
     }
     if (children.length === 0) break;
     children.sort((a, b) => b.score - a.score);
-    beam = children.slice(0, BEAM_WIDTH);
+    beam = children.slice(0, profile.beamWidth);
   }
 
   return best.path;
